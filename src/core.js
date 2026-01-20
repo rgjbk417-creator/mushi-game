@@ -161,32 +161,89 @@
   }
 
   // ===== 育成 =====
-  function gainExp(state, bug, amount){
-    bug.exp += amount;
+  function gainExp(state, bug, amount, sourceMode="atk"){
+  bug.exp += amount;
 
-    while(bug.exp >= expToNext(bug.level)){
-      bug.exp -= expToNext(bug.level);
-      bug.level++;
+  while(bug.exp >= expToNext(bug.level)){
+    bug.exp -= expToNext(bug.level);
+    bug.level++;
 
-      const g = bug.growthMult || 1;
-      bug.iv.hp += r(0,1) * g;
-      if(Math.random()<0.7) bug.iv.atk += r(0,1) * g;
-      if(Math.random()<0.7) bug.iv.def += r(0,1) * g;
-      if(Math.random()<0.6) bug.iv.spd += r(0,1) * g;
+    const g = bug.growthMult || 1;
 
-      const sp = SPECIES.find(s=>s.id===bug.specId);
-      if(!bug.trait && Math.random()<0.22){
-        bug.trait = pick(sp.traitPool);
-        pushLog(state, `🌟 特性が覚醒！「${bug.trait}」`);
+    // -----------------------------
+    // レベルアップ時の成長（寄せで伸びが変わる）
+    // ここが「ゲーム性」になる部分
+    // -----------------------------
+
+    // HPは毎回ちょい伸び（好みで調整）
+    bug.iv.hp += r(0,1) * g;
+
+    // 基本：そこそこ伸びる
+    let atkChance = 0.70;
+    let defChance = 0.70;
+    let spdChance = 0.60;
+
+    // 寄せ：対象だけ伸びやすくする
+    if(sourceMode === "atk"){
+      atkChance = 0.90;
+      defChance = 0.60;
+      spdChance = 0.55;
+    }else if(sourceMode === "def"){
+      atkChance = 0.60;
+      defChance = 0.90;
+      spdChance = 0.55;
+    }else if(sourceMode === "spd"){
+      atkChance = 0.60;
+      defChance = 0.60;
+      spdChance = 0.85;
+    }else if(sourceMode === "trait"){
+      // 特性トレは「伸びはやや控えめ＆均し」でもいい
+      atkChance = 0.65;
+      defChance = 0.65;
+      spdChance = 0.60;
+    }
+
+    // 伸び量：寄せ対象は +1が出やすいようにする（好みで調整）
+    const grow1 = () => (r(0,1) * g);         // 0 or 1
+    const grow2 = () => ((r(0,1) + r(0,1)) * g); // 0〜2（寄せボーナス）
+
+    if(Math.random() < atkChance) bug.iv.atk += (sourceMode==="atk" ? grow2() : grow1());
+    if(Math.random() < defChance) bug.iv.def += (sourceMode==="def" ? grow2() : grow1());
+    if(Math.random() < spdChance) bug.iv.spd += (sourceMode==="spd" ? grow2() : grow1());
+
+    // -----------------------------
+    // 特性獲得抽選（LvUP時）
+    //  特性トレ: 1/50
+    //  それ以外: 1/100
+    // -----------------------------
+    const sp = SPECIES.find(s=>s.id===bug.specId);
+
+    if(!bug.trait){
+      const rate = (sourceMode === "trait") ? (1/50) : (1/100);
+      if(Math.random() < rate){
+        // speciesごとのtraitPoolを使う（タイプ別特性はここで担保）
+        if(sp && Array.isArray(sp.traitPool) && sp.traitPool.length){
+          bug.trait = pick(sp.traitPool);
+          pushLog(state, `🌟 特性が覚醒！「${bug.trait}」`);
+        }
       }
-
-      recalc(bug);
-      bug.hp = bug.hpMax;
-      pushLog(state, `⬆️ レベルアップ！ Lv.${bug.level}${bug.isLegendary?"（伝説成長）":""}`);
     }
 
     recalc(bug);
+    bug.hp = bug.hpMax;
+
+    // ログ（どの寄せで上がったか分かるように）
+    const tag =
+      sourceMode==="atk" ? "ATK寄せ" :
+      sourceMode==="def" ? "DEF寄せ" :
+      sourceMode==="spd" ? "SPD寄せ" :
+      sourceMode==="trait" ? "特性トレ" : "トレ";
+
+    pushLog(state, `⬆️ レベルアップ！ Lv.${bug.level}${bug.isLegendary?"（伝説成長）":""} / ${tag}`);
   }
+
+  recalc(bug);
+}
 
   function trainSelected(state){
     // =============================
