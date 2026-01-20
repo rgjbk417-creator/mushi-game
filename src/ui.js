@@ -1,298 +1,519 @@
 // src/ui.js
 (() => {
-  const { loadState, saveState, notify, pushLog } = window.MushiState;
+  // ============================
+  // 依存（ここが死ぬと全滅する）
+  // ============================
+  const MS = window.MushiState;
   const Core = window.MushiCore;
 
-  // =========================================================
-  // ここがこの画面！：DOM参照
-  // =========================================================
-  const $ = (sel) => document.querySelector(sel);
+  if(!MS || !Core){
+    document.body.innerHTML = `
+      <div style="padding:16px;font-family:sans-serif">
+        <h2>起動エラー</h2>
+        <p>MushiState または MushiCore が読み込めてない。</p>
+        <p>index.html の script 読み込み順を確認してね。</p>
+      </div>
+    `;
+    return;
+  }
 
-  // 必要なコンテナ（無ければ自動生成）
-  function ensureRoot(){
-    if(!$("#app")){
-      const d = document.createElement("div");
-      d.id = "app";
-      document.body.appendChild(d);
+  // 使う関数（キミの既存APIに寄せる）
+  const setRoute    = MS.setRoute;
+  const setSelected = MS.setSelected;
+  const save        = MS.save;
+  const hardReset   = MS.hardReset;
+  const notify      = MS.notify;
+
+  const { SPECIES, TRAITS, expToNext, getSelected } = Core;
+
+  // タブ
+  const TABS = [
+    { id:"home",  label:"🏠\nHOME" },
+    { id:"train", label:"🏋️\n育成" },
+    { id:"battle",label:"⚔️\nバトル" },
+    { id:"gacha", label:"🎲\nガチャ" },
+    { id:"dex",   label:"📚\n図鑑" },
+    { id:"settings", label:"⚙️\n設定" },
+  ];
+
+  const $ = (q) => document.querySelector(q);
+
+  function toast(msg){
+    const el = $("#toast");
+    if(!el) return;
+    el.textContent = msg;
+    el.classList.add("show");
+    el.setAttribute("aria-hidden","false");
+    setTimeout(() => {
+      el.classList.remove("show");
+      el.setAttribute("aria-hidden","true");
+    }, 1100);
+  }
+
+  // ============================
+  // 上部：タブとタイトル
+  // ============================
+  function renderTabs(state){
+    const tabbar = $("#tabbar");
+    if(!tabbar) return;
+
+    tabbar.innerHTML = TABS.map(t => {
+      const active = (state.route === t.id) ? "active" : "";
+      return `<div class="tab ${active}" data-route="${t.id}">${t.label.replace("\n","<br>")}</div>`;
+    }).join("");
+
+    tabbar.querySelectorAll(".tab").forEach(el => {
+      el.addEventListener("click", () => {
+        const r = el.getAttribute("data-route");
+        setRoute(state, r);
+        notify();
+      });
+    });
+  }
+
+  function renderTop(state){
+    const chip = $("#chipCoins");
+    if(chip) chip.textContent = `🪙 ${state.coins}`;
+
+    const titleMap = {
+      home:"HOME",
+      train:"ムシ育成",
+      battle:"バトル",
+      gacha:"ガチャ",
+      dex:"図鑑",
+      settings:"設定",
+    };
+
+    const titleEl = $("#topTitle");
+    if(titleEl) titleEl.textContent = `ムシ育成バトル / ${titleMap[state.route] || "HOME"}`;
+  }
+
+  // ============================
+  // カード表示（自分 / 野生）
+  // ============================
+  function renderBugCard(b){
+    const sp = SPECIES.find(s=>s.id===b.specId);
+    const expNeed = expToNext(b.level);
+    const expPct = Math.max(0, Math.min(1, (b.exp||0)/expNeed));
+    const hpPct = Math.max(0, Math.min(1, b.hp/b.hpMax));
+
+    const trait = b.trait
+      ? `<span class="tag">特性：${b.trait}</span><span class="muted">${TRAITS[b.trait]?.desc||""}</span>`
+      : `<span class="muted">特性：なし</span>`;
+
+    const legendTag = b.isLegendary
+      ? `<span class="tag tagLegend">伝説</span>`
+      : "";
+
+    return `
+      <div class="card">
+        <div class="h3">${b.isLegendary?"👑 ":""}${b.nickname} <span class="muted">(${sp?.name||b.specId}/${b.type})</span></div>
+        <div class="muted">Lv.${b.level} / EXP ${b.exp||0} / ${expNeed}</div>
+
+        <div class="sep"></div>
+
+        <div class="muted">HP ${b.hp} / ${b.hpMax}</div>
+        <div class="bar"><div class="fill fillHp" style="width:${Math.round(hpPct*100)}%"></div></div>
+
+        <div class="sep"></div>
+
+        <div class="grid2">
+          <div class="muted">ATK：<b>${b.atk}</b></div>
+          <div class="muted">DEF：<b>${b.def}</b></div>
+          <div class="muted">SPD：<b>${b.spd}</b></div>
+          <div class="muted">属性：<b>${b.type}</b></div>
+        </div>
+
+        <div style="margin-top:10px">${legendTag}</div>
+        <div style="margin-top:10px">${trait}</div>
+
+        <div style="margin-top:10px">
+          <div class="muted">レベル進行</div>
+          <div class="bar"><div class="fill" style="width:${Math.round(expPct*100)}%"></div></div>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderWildCard(w){
+    const sp = SPECIES.find(s=>s.id===w.specId);
+    const hpPct = Math.max(0, Math.min(1, w.hp/w.hpMax));
+
+    const trait = w.trait
+      ? `<span class="tag">特性：${w.trait}</span><span class="muted">${TRAITS[w.trait]?.desc||""}</span>`
+      : `<span class="muted">特性：なし</span>`;
+
+    const legendTag = w.isLegendary
+      ? `<span class="tag tagLegend">伝説</span>`
+      : "";
+
+    return `
+      <div class="card">
+        <div class="h3">${w.isLegendary?"👑 伝説の":"野生の"}${w.nickname} <span class="muted">(${sp?.name||w.specId}/${w.type})</span></div>
+        <div class="muted">Lv.${w.level}</div>
+
+        <div class="sep"></div>
+
+        <div class="muted">HP ${w.hp} / ${w.hpMax}</div>
+        <div class="bar"><div class="fill ${w.hp>0?"fillBad":"fill"}" style="width:${Math.round(hpPct*100)}%"></div></div>
+
+        <div class="sep"></div>
+
+        <div class="grid2">
+          <div class="muted">ATK：<b>${w.atk}</b></div>
+          <div class="muted">DEF：<b>${w.def}</b></div>
+          <div class="muted">SPD：<b>${w.spd}</b></div>
+          <div class="muted">属性：<b>${w.type}</b></div>
+        </div>
+
+        <div style="margin-top:10px">${legendTag}</div>
+        <div style="margin-top:10px">${trait}</div>
+      </div>
+    `;
+  }
+
+  // ============================
+  // 画面：HOME
+  // ============================
+  function screenHome(state){
+    const me = getSelected(state);
+    return `
+      <div class="row">
+        <div class="card">
+          <div class="h2">🏠 メインメニュー</div>
+          <div class="muted">下タブで画面切替。まずは育成かバトルいけるぢゃん？</div>
+          <div class="sep"></div>
+
+          <div class="grid2">
+            <button class="btn" data-go="train">🏋️ 育成へ</button>
+            <button class="btn btn2" data-go="battle">⚔️ バトルへ</button>
+            <button class="btn btn2" data-go="gacha">🎲 ガチャへ</button>
+            <button class="btn btn2" data-go="dex">📚 図鑑へ</button>
+          </div>
+        </div>
+
+        ${renderBugCard(me)}
+      </div>
+    `;
+  }
+
+  // ============================
+  // 画面：育成
+  // ============================
+  function screenTrain(state){
+    const me = getSelected(state);
+    const options = state.bugs.map(b => `<option value="${b.uid}">${b.isLegendary?"👑 ":""}${b.nickname}（Lv.${b.level}）</option>`).join("");
+
+    // train points 表示（あれば）
+    const pts = state.train?.points ?? 0;
+
+    return `
+      <div class="row">
+        <div class="card">
+          <div class="h2">🏋️ ムシ育成</div>
+          <div class="muted">トレ回数：<b>${pts}</b>/3（1時間で1回復）</div>
+
+          <div class="sep"></div>
+
+          <div class="grid2">
+            <div>
+              <div class="muted">育てるムシ</div>
+              <select id="selBug">${options}</select>
+            </div>
+            <div>
+              <div class="muted">名前変更（任意）</div>
+              <input id="renameBug" placeholder="例：ギラツノ" />
+            </div>
+          </div>
+
+          <div class="sep"></div>
+
+          <div class="grid2">
+            <button class="btn btn2" id="btnTrainAtk">🗡️ ATK寄せ</button>
+            <button class="btn btn2" id="btnTrainDef">🛡️ DEF寄せ</button>
+            <button class="btn btn2" id="btnTrainSpd">💨 SPD寄せ</button>
+            <button class="btn btn2" id="btnTrainTrait">🌟 特性トレ</button>
+          </div>
+
+          <div class="sep"></div>
+          <div class="grid2">
+            <button class="btn" id="btnHeal">🩹 休ませる（全回復）</button>
+            <button class="btn btn2" id="btnSave">💾 保存</button>
+          </div>
+        </div>
+
+        ${renderBugCard(me)}
+      </div>
+    `;
+  }
+
+  // ============================
+  // 画面：バトル（ログ上/コマンド下）
+  // ============================
+  function screenBattle(state){
+    const me = getSelected(state);
+    const wild = state.wild;
+
+    const canAct = !!(wild && state.battle.active && !state.battle.over && state.battle.turn==="me");
+    const canCapture = !!(wild && state.battle.active && state.battle.over && wild.hp<=0);
+
+    return `
+      <div class="battle">
+
+        <div class="battle-top">
+          <div class="mini-card">
+            <div class="h3">🧍 自分</div>
+            ${renderBugCard(me)}
+          </div>
+
+          <div class="mini-card">
+            <div class="h3">🌿 野生</div>
+            ${wild ? renderWildCard(wild) : `<div class="muted">まだいない。遭遇してね。</div>`}
+          </div>
+        </div>
+
+        <div class="battle-mid">
+          <div class="card battle-log-wrap">
+            <div class="h3">ログ</div>
+            <div class="muted" id="battleLast"></div>
+            <pre class="log" id="logBattle">${(state.battle.log||[]).join("\n")}</pre>
+          </div>
+        </div>
+
+        <div class="battle-bottom">
+          <div class="card">
+            <div class="h2">⚔️ バトル</div>
+            <div class="muted">遭遇 → 開始 → コマンド。勝ったら捕獲。</div>
+
+            <div class="sep"></div>
+
+            <div class="grid2">
+              <button class="btn" id="btnSpawn">🌿 遭遇する</button>
+              <button class="btn btn2" id="btnStartBattle" ${wild ? "" : "disabled"}>⚔️ 戦う（開始）</button>
+            </div>
+
+            <div class="sep"></div>
+
+            <div class="grid2 battle-commands">
+              <button class="btn btn2" id="btnAtk" ${canAct ? "" : "disabled"}>🗡️ こうげき</button>
+              <button class="btn btn2" id="btnGuard" ${canAct ? "" : "disabled"}>🛡️ ぼうぎょ</button>
+              <button class="btn btn2" id="btnSkill" ${canAct ? "" : "disabled"}>✨ とくぎ</button>
+              <button class="btn" id="btnCapture" ${canCapture ? "" : "disabled"}>🫙 捕獲</button>
+            </div>
+
+            <div class="sep"></div>
+
+            <div class="grid2">
+              <button class="btn btn2" id="btnHealBattle">🩹 自分を回復</button>
+              <button class="btn btn2" id="btnSaveBattle">💾 保存</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    `;
+  }
+
+  function postRenderBattle(state){
+    const logEl = document.getElementById("logBattle");
+    if(logEl) logEl.scrollTop = logEl.scrollHeight;
+
+    const lastEl = document.getElementById("battleLast");
+    if(lastEl){
+      const logs = state.battle.log || [];
+      lastEl.textContent = logs.length ? ("直近：" + logs[logs.length-1]) : "";
     }
   }
 
-  // =========================================================
-  // ここがこの画面！：小物UIパーツ
-  // =========================================================
-  function fmtBug(b){
-    const sp = Core.SPECIES.find(s=>s.id===b.specId);
-    const trait = b.trait ? ` / 特性:${b.trait}` : "";
-    const tag = b.isLegendary ? "👑" : "";
-    return `${tag}${b.nickname}（${sp?.type || b.type}） Lv.${b.level} HP ${b.hp}/${b.hpMax}  ATK${b.atk} DEF${b.def} SPD${b.spd}${trait}`;
-  }
+  // ============================
+  // 画面：ガチャ
+  // ============================
+  function screenGacha(state){
+    const last = state.gacha?.last || null;
+    const lastHtml = last
+      ? `<div class="sep"></div>
+         <div class="h3">直近の結果</div>
+         ${last.map(x => `<div class="muted">・${x.isLegendary?"👑 ":""}${x.nickname}</div>`).join("")}`
+      : `<div class="sep"></div><div class="muted">まだ引いてない。</div>`;
 
-  function expBar(b){
-    const need = Core.expToNext(b.level);
-    const cur = b.exp || 0;
-    const w = Math.max(0, Math.min(100, Math.floor((cur/need)*100)));
     return `
-      <div class="expWrap" style="margin:6px 0;">
-        <div style="font-size:12px;opacity:.8;">EXP ${cur}/${need}</div>
-        <div style="background:#222;border-radius:999px;overflow:hidden;height:10px;">
-          <div style="height:10px;width:${w}%;background:#4aa3ff;"></div>
+      <div class="card">
+        <div class="h2">🎲 ガチャ</div>
+        <div class="muted">1回10🪙。伝説も混ざる。</div>
+
+        <div class="sep"></div>
+
+        <div class="grid2">
+          <button class="btn" id="btnGacha1">🎲 1回（10🪙）</button>
+          <button class="btn btn2" id="btnGacha10">🎲 10回（100🪙）</button>
         </div>
+
+        ${lastHtml}
+
+        <div class="sep"></div>
+        <button class="btn btn2" id="btnSaveGacha">💾 保存</button>
       </div>
     `;
   }
 
-  function trainStatus(state){
-    const t = state.train || { points:0, last:Date.now() };
-    return `🏋️ トレ回数：${t.points}/3（1時間で1回復）`;
-  }
-
-  function btn(html, onClick, cls="btn"){
-    const id = "btn_" + Math.random().toString(16).slice(2);
-    setTimeout(() => {
-      const el = document.getElementById(id);
-      if(el) el.addEventListener("click", onClick);
-    }, 0);
-    return `<button id="${id}" class="${cls}">${html}</button>`;
-  }
-
-  function navBtn(state, label, route){
-    return btn(label, () => {
-      state.route = route;
-      saveState(state);
-      notify();
-      render();
-    }, "navbtn");
-  }
-
-  // =========================================================
-  // ここがこの画面！：共通レイアウト（上：ナビ / 下：画面）
-  // =========================================================
-  function layout(state, inner){
-    const me = Core.getSelected(state);
-    return `
-      <div class="wrap" style="font-family:system-ui,-apple-system,Segoe UI,Roboto,'Hiragino Kaku Gothic ProN',Meiryo,sans-serif;padding:14px;max-width:900px;margin:0 auto;">
-        <div class="top" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-          ${navBtn(state,"🏠 ホーム","home")}
-          ${navBtn(state,"🏋️ 育成","train")}
-          ${navBtn(state,"⚔️ バトル","battle")}
-          ${navBtn(state,"🎰 ガチャ","gacha")}
-          <span style="margin-left:auto;font-weight:700;">🪙 ${state.coins}</span>
-        </div>
-
-        <div class="card" style="margin-top:12px;padding:12px;border:1px solid #333;border-radius:10px;background:#111;color:#eee;">
-          <div style="font-size:13px;opacity:.85;">選択中</div>
-          <div style="font-weight:700;margin-top:2px;">${fmtBug(me)}</div>
-          ${expBar(me)}
-          <div style="margin-top:6px;font-size:13px;opacity:.85;">${trainStatus(state)}</div>
-        </div>
-
-        <div class="screen" style="margin-top:12px;">
-          ${inner}
-        </div>
-
-        <div class="log" style="margin-top:12px;padding:12px;border:1px solid #333;border-radius:10px;background:#0b0b0b;color:#ddd;">
-          <div style="display:flex;align-items:center;gap:8px;">
-            <div style="font-weight:800;">ログ</div>
-            <div style="margin-left:auto;">
-              ${btn("🧹 クリア", () => { state.battle.log = []; saveState(state); notify(); render(); }, "btn")}
-            </div>
-          </div>
-          <div style="margin-top:8px;white-space:pre-wrap;line-height:1.35;">${(state.battle?.log||[]).slice(-60).join("\n")}</div>
-        </div>
-      </div>
-    `;
-  }
-
-  // =========================================================
-  // ここがこの画面！：ホーム画面
-  // =========================================================
-  function viewHome(state){
-    const list = state.bugs.map(b => {
-      const id = "pick_" + b.uid;
-      setTimeout(() => {
-        const el = document.getElementById(id);
-        if(el){
-          el.addEventListener("click", () => {
-            state.selectedUid = b.uid;
-            saveState(state);
-            notify();
-            render();
-          });
-        }
-      }, 0);
+  function screenDex(state){
+    const rows = SPECIES.map(s=>{
+      const owned = state.bugs.filter(b=>b.specId===s.id).length;
+      const ownedLegend = state.bugs.filter(b=>b.specId===s.id && b.isLegendary).length;
+      const captured = state.dex[s.id] || 0;
       return `
-        <div style="display:flex;gap:10px;align-items:center;margin:8px 0;">
-          <button id="${id}" class="btn" style="white-space:nowrap;">選ぶ</button>
-          <div>${fmtBug(b)}</div>
+        <div style="padding:8px 0;border-bottom:1px solid var(--line)">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+            <div><b>${s.name}</b> <span class="muted">(${s.type})</span></div>
+            <div class="muted">所持:${owned}（👑${ownedLegend}） / 捕獲:${captured}</div>
+          </div>
         </div>
       `;
     }).join("");
 
-    return layout(state, `
-      <div class="card" style="padding:12px;border:1px solid #333;border-radius:10px;background:#111;color:#eee;">
-        <div style="font-weight:800;margin-bottom:8px;">所持ムシ</div>
-        ${list}
+    return `
+      <div class="card">
+        <div class="h2">📚 図鑑 / 所持</div>
+        <div class="muted">所持ムシ：${state.bugs.length}匹</div>
+        <div class="sep"></div>
+        ${rows}
       </div>
-    `);
+    `;
   }
 
-  // =========================================================
-  // ここがこの画面！：育成画面（ATK/DEF/SPD/特性トレ + 残り回数表示）
-  // =========================================================
-  function viewTrain(state){
-    const me = Core.getSelected(state);
+  function screenSettings(state){
+    return `
+      <div class="card">
+        <div class="h2">⚙️ 設定</div>
+        <div class="sep"></div>
 
-    const doTrain = (mode) => {
-      // ポイント回復も反映したいので都度ensure
-      Core.ensureCoreState(state);
-      Core.trainSelected(state, mode);
-      saveState(state);
-      notify();
-      render();
-    };
-
-    const doHeal = () => {
-      Core.ensureCoreState(state);
-      Core.healSelected(state);
-      saveState(state);
-      notify();
-      render();
-    };
-
-    return layout(state, `
-      <div class="card" style="padding:12px;border:1px solid #333;border-radius:10px;background:#111;color:#eee;">
-        <div style="font-weight:800;margin-bottom:10px;">🏋️ 育成</div>
-
-        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
-          ${btn("🗡️ ATK寄せ",  () => doTrain("atk"),   "btn")}
-          ${btn("🛡️ DEF寄せ",  () => doTrain("def"),   "btn")}
-          ${btn("💨 SPD寄せ",  () => doTrain("spd"),   "btn")}
-          ${btn("🌟 特性トレ",  () => doTrain("trait"), "btn")}
-          ${btn("🩹 休ませる",  () => doHeal(),         "btn")}
-        </div>
-
-        <div style="font-size:13px;opacity:.85;line-height:1.5;">
-          <div>・トレ回数：最大3、1時間で1回復</div>
-          <div>・特性抽選：特性トレでLvUPしたら 1/50、それ以外は 1/100</div>
-          <div>・寄せた能力は、LvUP時の伸びが強くなる</div>
-        </div>
-
-        <div style="margin-top:10px;padding:10px;border:1px solid #2b2b2b;border-radius:10px;background:#0e0e0e;">
-          <div style="font-weight:700;">今のステータス</div>
-          <div style="margin-top:6px;">${fmtBug(me)}</div>
-          ${expBar(me)}
+        <div class="grid2">
+          <button class="btn btn2" id="btnSaveSet">💾 保存</button>
+          <button class="btn btnDanger" id="btnResetSet">🧼 初期化</button>
         </div>
       </div>
-    `);
+    `;
   }
 
-  // =========================================================
-  // ここがこの画面！：バトル画面（遭遇/開始/行動/捕獲）
-  // =========================================================
-  function viewBattle(state){
-    const me = Core.getSelected(state);
-    const wild = state.wild;
+  // ============================
+  // 画面ごとのイベント紐付け
+  // ============================
+  function bindScreenEvents(state){
+    // HOME
+    document.querySelectorAll("[data-go]").forEach(btn => {
+      btn.addEventListener("click", () => setRoute(state, btn.getAttribute("data-go")));
+    });
 
-    const spawn = () => { Core.spawnWild(state); saveState(state); notify(); render(); };
-    const start = () => { Core.startBattle(state); saveState(state); notify(); render(); };
-    const act = (k) => { Core.myAct(state, k); saveState(state); notify(); render(); };
-    const cap = () => { Core.tryCapture(state); saveState(state); notify(); render(); };
-    const heal = () => { Core.healSelected(state); saveState(state); notify(); render(); };
-
-    let wildBox = `<div style="opacity:.8;">野生なし。遭遇してね。</div>`;
-    if(wild){
-      wildBox = `
-        <div style="font-weight:800;margin-bottom:6px;">野生</div>
-        <div>${fmtBug(wild)}</div>
-      `;
+    // TRAIN
+    const sel = $("#selBug");
+    if(sel){
+      sel.value = state.selectedUid;
+      sel.addEventListener("change", () => setSelected(state, sel.value));
     }
 
-    return layout(state, `
-      <div class="card" style="padding:12px;border:1px solid #333;border-radius:10px;background:#111;color:#eee;">
-        <div style="font-weight:800;margin-bottom:10px;">⚔️ バトル</div>
+    const ren = $("#renameBug");
+    if(ren){
+      ren.addEventListener("change", () => {
+        const v = ren.value.trim();
+        if(!v) return;
+        const me = getSelected(state);
+        me.nickname = v.slice(0,10);
+        ren.value = "";
+        toast("名前変更した");
+        notify();
+      });
+    }
 
-        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
-          ${btn("🌿 遭遇", () => spawn(), "btn")}
-          ${btn("▶️ 開始", () => start(), "btn")}
-          ${btn("🗡️ 攻撃", () => act("attack"), "btn")}
-          ${btn("✨ とくぎ", () => act("skill"), "btn")}
-          ${btn("🛡️ ぼうぎょ", () => act("guard"), "btn")}
-          ${btn("🫙 捕獲", () => cap(), "btn")}
-          ${btn("🩹 休ませる", () => heal(), "btn")}
-        </div>
+    const atk = $("#btnTrainAtk");
+    if(atk) atk.addEventListener("click", () => { Core.trainSelected(state,"atk"); toast("鍛えた"); notify(); });
 
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-          <div style="padding:10px;border:1px solid #2b2b2b;border-radius:10px;background:#0e0e0e;">
-            <div style="font-weight:800;margin-bottom:6px;">自分</div>
-            <div>${fmtBug(me)}</div>
-            ${expBar(me)}
-          </div>
-          <div style="padding:10px;border:1px solid #2b2b2b;border-radius:10px;background:#0e0e0e;">
-            ${wildBox}
-          </div>
-        </div>
-      </div>
-    `);
+    const def = $("#btnTrainDef");
+    if(def) def.addEventListener("click", () => { Core.trainSelected(state,"def"); toast("鍛えた"); notify(); });
+
+    const spd = $("#btnTrainSpd");
+    if(spd) spd.addEventListener("click", () => { Core.trainSelected(state,"spd"); toast("鍛えた"); notify(); });
+
+    const tr = $("#btnTrainTrait");
+    if(tr) tr.addEventListener("click", () => { Core.trainSelected(state,"trait"); toast("鍛えた"); notify(); });
+
+    const btnHeal = $("#btnHeal");
+    if(btnHeal) btnHeal.addEventListener("click", () => { Core.healSelected(state); toast("回復した"); notify(); });
+
+    const btnSave = $("#btnSave");
+    if(btnSave) btnSave.addEventListener("click", () => { save(state); toast("保存した"); });
+
+    // BATTLE
+    const btnSpawn = $("#btnSpawn");
+    if(btnSpawn) btnSpawn.addEventListener("click", () => { Core.spawnWild(state); toast("遭遇！"); notify(); });
+
+    const btnStart = $("#btnStartBattle");
+    if(btnStart) btnStart.addEventListener("click", () => { Core.startBattle(state); toast("開戦"); notify(); });
+
+    const btnAtk = $("#btnAtk");
+    if(btnAtk) btnAtk.addEventListener("click", () => { Core.myAct(state, "attack"); notify(); });
+
+    const btnGuard = $("#btnGuard");
+    if(btnGuard) btnGuard.addEventListener("click", () => { Core.myAct(state, "guard"); notify(); });
+
+    const btnSkill = $("#btnSkill");
+    if(btnSkill) btnSkill.addEventListener("click", () => { Core.myAct(state, "skill"); notify(); });
+
+    const btnCapture = $("#btnCapture");
+    if(btnCapture) btnCapture.addEventListener("click", () => { Core.tryCapture(state); toast("捕獲判定"); notify(); });
+
+    const btnHealBattle = $("#btnHealBattle");
+    if(btnHealBattle) btnHealBattle.addEventListener("click", () => { Core.healSelected(state); toast("回復した"); notify(); });
+
+    const btnSaveBattle = $("#btnSaveBattle");
+    if(btnSaveBattle) btnSaveBattle.addEventListener("click", () => { save(state); toast("保存した"); });
+
+    // GACHA
+    const g1 = $("#btnGacha1");
+    if(g1) g1.addEventListener("click", () => { const r = Core.gachaPull(state,1); toast(r.length?"ガチャ引いた":"コイン足りん"); notify(); });
+
+    const g10 = $("#btnGacha10");
+    if(g10) g10.addEventListener("click", () => { const r = Core.gachaPull(state,10); toast(r.length?"10連！":"コイン足りん"); notify(); });
+
+    const btnSaveGacha = $("#btnSaveGacha");
+    if(btnSaveGacha) btnSaveGacha.addEventListener("click", () => { save(state); toast("保存した"); });
+
+    // SETTINGS
+    const btnSaveSet = $("#btnSaveSet");
+    if(btnSaveSet) btnSaveSet.addEventListener("click", () => { save(state); toast("保存した"); });
+
+    const btnResetSet = $("#btnResetSet");
+    if(btnResetSet){
+      btnResetSet.addEventListener("click", () => {
+        if(!confirm("初期化する？（セーブ消える）")) return;
+        hardReset();
+        location.reload();
+      });
+    }
   }
 
-  // =========================================================
-  // ここがこの画面！：ガチャ画面（1連/10連）
-  // =========================================================
-  function viewGacha(state){
-    const pull = (n) => {
-      Core.gachaPull(state, n);
-      saveState(state);
-      notify();
-      render();
-    };
+  // ============================
+  // 画面描画（notifyで呼ばれる想定）
+  // ============================
+  function render(state){
+    renderTop(state);
+    renderTabs(state);
 
-    const last = state.gacha?.last || null;
-    const lastTxt = last
-      ? last.map(x => `${x.isLegendary?"👑 ":""}${x.nickname} (${x.specId})`).join("\n")
-      : "まだ引いてない";
+    const view = $("#view");
+    if(!view) return;
 
-    return layout(state, `
-      <div class="card" style="padding:12px;border:1px solid #333;border-radius:10px;background:#111;color:#eee;">
-        <div style="font-weight:800;margin-bottom:10px;">🎰 ガチャ</div>
+    if(state.route === "home") view.innerHTML = screenHome(state);
+    else if(state.route === "train") view.innerHTML = screenTrain(state);
+    else if(state.route === "battle") view.innerHTML = screenBattle(state);
+    else if(state.route === "gacha") view.innerHTML = screenGacha(state);
+    else if(state.route === "dex") view.innerHTML = screenDex(state);
+    else if(state.route === "settings") view.innerHTML = screenSettings(state);
+    else view.innerHTML = screenHome(state);
 
-        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
-          ${btn("🎰 1連（10🪙）", () => pull(1), "btn")}
-          ${btn("🎰 10連（100🪙）", () => pull(10), "btn")}
-        </div>
+    bindScreenEvents(state);
 
-        <div style="padding:10px;border:1px solid #2b2b2b;border-radius:10px;background:#0e0e0e;">
-          <div style="font-weight:800;margin-bottom:6px;">直近結果</div>
-          <div style="white-space:pre-wrap;line-height:1.35;">${lastTxt}</div>
-        </div>
-      </div>
-    `);
+    if(state.route === "battle") postRenderBattle(state);
   }
 
-  // =========================================================
-  // ここがこの画面！：レンダー
-  // =========================================================
-  function render(){
-    ensureRoot();
-    let state = loadState();
-    state = Core.ensureCoreState(state);
-
-    const route = state.route || "home";
-
-    let html = "";
-    if(route === "train") html = viewTrain(state);
-    else if(route === "battle") html = viewBattle(state);
-    else if(route === "gacha") html = viewGacha(state);
-    else html = viewHome(state);
-
-    $("#app").innerHTML = html;
-  }
-
-  // 初回描画 + 状態更新時も描画できるように
-  window.MushiUI = { render };
-  render();
-
-  // notifyが呼ばれたら、外側で render を呼びたい場合があるのでフック（無ければ無視）
-  if(typeof window.MushiState?.onNotify === "function"){
-    window.MushiState.onNotify(() => render());
-  }
+  // 公開
+  window.MushiUI = { render, toast };
 })();
