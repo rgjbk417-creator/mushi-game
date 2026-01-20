@@ -101,3 +101,56 @@ select,input{
   opacity:0; pointer-events:none; transition:opacity .18s ease;
 }
 .toast.show{opacity:1}
+.battle{
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.battle-top{
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  padding: 10px;
+}
+
+.battle-top .mini-card{
+  padding: 6px 8px;
+  border-radius: 12px;
+}
+
+.battle-top .mini-card .card{
+  margin: 0;
+}
+
+.battle-mid{
+  flex: 1;
+  padding: 0 10px;
+  overflow: hidden;
+}
+
+.battle-log-wrap{
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.battle-log-wrap .log{
+  flex: 1;
+  overflow-y: auto;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.battle-bottom{
+  position: sticky;
+  bottom: 0;
+  padding: 0 10px 10px;
+}
+
+#battleLast{
+  font-size: 12px;
+  opacity: 0.85;
+  margin: 4px 0 8px;
+}
