@@ -1,21 +1,42 @@
 // src/ui.js
+// =====================================================
+// 画面描画(UI)担当
+// ここがこの画面！が分かるようにコメント多め版
+//
+// 構成：
+//  1) 共通UI（トースト/タブ/ヘッダー）
+//  2) 共通カード描画（自分/野生）
+//  3) 画面ごとのHTML（HOME / 育成 / バトル / ガチャ / 図鑑 / 設定）
+//  4) 画面ごとのイベント紐付け
+//  5) render(state) 本体
+// =====================================================
 (() => {
-  const { setRoute, setSelected, save, hardReset, pushLog } = window.MushiState;
-  const { SPECIES, TRAITS, expToNext, getSelected, LEGENDARY_RATE, LEGENDARY_STAT_MULT, LEGENDARY_WIN_EXP_MULT, LEGENDARY_GROWTH_MULT } = window.MushiCore;
+  const { setRoute, setSelected, save, hardReset } = window.MushiState;
+  const {
+    SPECIES, TRAITS, expToNext, getSelected,
+    LEGENDARY_RATE, LEGENDARY_STAT_MULT, LEGENDARY_WIN_EXP_MULT, LEGENDARY_GROWTH_MULT
+  } = window.MushiCore;
 
+  // -----------------------------
+  // タブ定義（下のメニュー）
+  // -----------------------------
   const TABS = [
-    { id:"home",  label:"🏠\nHOME" },
-    { id:"train", label:"🏋️\n育成" },
-    { id:"battle",label:"⚔️\nバトル" },
-    { id:"gacha", label:"🎲\nガチャ" },
-    { id:"dex",   label:"📚\n図鑑" },
+    { id:"home",     label:"🏠\nHOME" },
+    { id:"train",    label:"🏋️\n育成" },
+    { id:"battle",   label:"⚔️\nバトル" },
+    { id:"gacha",    label:"🎲\nガチャ" },
+    { id:"dex",      label:"📚\n図鑑" },
     { id:"settings", label:"⚙️\n設定" },
   ];
 
   const $ = (q) => document.querySelector(q);
 
+  // -----------------------------
+  // トースト（右下とかに出る通知）
+  // -----------------------------
   function toast(msg){
     const el = $("#toast");
+    if(!el) return;
     el.textContent = msg;
     el.classList.add("show");
     el.setAttribute("aria-hidden","false");
@@ -25,8 +46,13 @@
     }, 1100);
   }
 
+  // -----------------------------
+  // タブ描画（下メニュー）
+  // -----------------------------
   function renderTabs(state){
     const tabbar = $("#tabbar");
+    if(!tabbar) return;
+
     tabbar.innerHTML = TABS.map(t => {
       const active = (state.route === t.id) ? "active" : "";
       return `<div class="tab ${active}" data-route="${t.id}">${t.label.replace("\n","<br>")}</div>`;
@@ -40,8 +66,13 @@
     });
   }
 
+  // -----------------------------
+  // 画面上部のタイトル/コイン
+  // -----------------------------
   function renderTop(state){
-    $("#chipCoins").textContent = `🪙 ${state.coins}`;
+    const chip = $("#chipCoins");
+    if(chip) chip.textContent = `🪙 ${state.coins}`;
+
     const titleMap = {
       home:"HOME",
       train:"ムシ育成",
@@ -50,9 +81,13 @@
       dex:"図鑑",
       settings:"設定",
     };
-    $("#topTitle").textContent = `ムシ育成バトル / ${titleMap[state.route] || "HOME"}`;
+    const topTitle = $("#topTitle");
+    if(topTitle) topTitle.textContent = `ムシ育成バトル / ${titleMap[state.route] || "HOME"}`;
   }
 
+  // =====================================================
+  // 共通：自分ムシのカード（HOME/育成/バトルで使用）
+  // =====================================================
   function renderBugCard(b, state){
     const sp = SPECIES.find(s=>s.id===b.specId);
     const expNeed = expToNext(b.level);
@@ -69,7 +104,7 @@
 
     return `
       <div class="card">
-        <div class="h3">${b.isLegendary?"👑 ":""}${b.nickname} <span class="muted">(${sp.name}/${b.type})</span></div>
+        <div class="h3">${b.isLegendary?"👑 ":""}${b.nickname} <span class="muted">(${sp?.name||b.specId}/${b.type})</span></div>
         <div class="muted">Lv.${b.level} / EXP ${b.exp} / ${expNeed}</div>
 
         <div class="sep"></div>
@@ -97,9 +132,13 @@
     `;
   }
 
+  // =====================================================
+  // 共通：野生ムシのカード（バトルで使用）
+  // =====================================================
   function renderWildCard(w){
     const sp = SPECIES.find(s=>s.id===w.specId);
     const hpPct = Math.max(0, Math.min(1, w.hp/w.hpMax));
+
     const trait = w.trait
       ? `<span class="tag">特性：${w.trait}</span><span class="muted">${TRAITS[w.trait]?.desc||""}</span>`
       : `<span class="muted">特性：なし</span>`;
@@ -110,7 +149,7 @@
 
     return `
       <div class="card">
-        <div class="h3">${w.isLegendary?"👑 伝説の":"野生の"}${w.nickname} <span class="muted">(${sp.name}/${w.type})</span></div>
+        <div class="h3">${w.isLegendary?"👑 伝説の":"野生の"}${w.nickname} <span class="muted">(${sp?.name||w.specId}/${w.type})</span></div>
         <div class="muted">Lv.${w.level}</div>
 
         <div class="sep"></div>
@@ -133,6 +172,9 @@
     `;
   }
 
+  // =====================================================
+  // 画面：HOME（メインメニュー）
+  // =====================================================
   function screenHome(state){
     const me = getSelected(state);
     return `
@@ -158,6 +200,9 @@
     `;
   }
 
+  // =====================================================
+  // 画面：育成
+  // =====================================================
   function screenTrain(state){
     const me = getSelected(state);
     const options = state.bugs.map(b => `<option value="${b.uid}">${b.isLegendary?"👑 ":""}${b.nickname}（Lv.${b.level}）</option>`).join("");
@@ -193,66 +238,99 @@
 
         ${renderBugCard(me, state)}
       </div>
+
       <pre class="log" id="logTrain">${(state.battle.log||[]).join("\n")}</pre>
     `;
   }
 
-  return `
-  <div class="battle">
+  // =====================================================
+  // 画面：バトル（レイアウト刷新版）
+  // 目的：スクロール不要で操作、ログは中央枠でスクロール
+  // =====================================================
+  function screenBattle(state){
+    const me = getSelected(state);
+    const wild = state.wild;
+    const canAct = !!(wild && state.battle.active && !state.battle.over && state.battle.turn==="me");
+    const canCapture = !!(wild && state.battle.active && state.battle.over && wild.hp<=0);
 
-    <div class="battle-top">
-      <div class="mini-card">
-        <div class="h3">🧍 自分</div>
-        ${renderBugCard(me, state)}
-      </div>
+    return `
+      <div class="battle">
 
-      <div class="mini-card">
-        <div class="h3">🌿 野生</div>
-        ${wild ? renderWildCard(wild) : `<div class="muted">まだいない。遭遇してね。</div>`}
-      </div>
-    </div>
+        <!-- 上：自分/野生の状況（小さめにするのはCSS側） -->
+        <div class="battle-top">
+          <div class="mini-card">
+            <div class="h3">🧍 自分</div>
+            ${renderBugCard(me, state)}
+          </div>
 
-    <div class="battle-mid">
-      <div class="card battle-log-wrap">
-        <div class="h3">ログ</div>
-        <div class="muted" id="battleLast"></div>
-        <pre class="log" id="logBattle">${(state.battle.log||[]).join("\n")}</pre>
-      </div>
-    </div>
-
-    <div class="battle-bottom">
-      <div class="card">
-        <div class="h2">⚔️ バトル</div>
-        <div class="muted">遭遇 → 開始 → コマンド。勝ったら捕獲。</div>
-
-        <div class="sep"></div>
-
-        <div class="grid2">
-          <button class="btn" id="btnSpawn">🌿 遭遇する</button>
-          <button class="btn btn2" id="btnStartBattle" ${wild ? "" : "disabled"}>⚔️ 戦う（開始）</button>
+          <div class="mini-card">
+            <div class="h3">🌿 野生</div>
+            ${wild ? renderWildCard(wild) : `<div class="muted">まだいない。遭遇してね。</div>`}
+          </div>
         </div>
 
-        <div class="sep"></div>
-
-        <div class="grid2 battle-commands">
-          <button class="btn btn2" id="btnAtk" ${canAct ? "" : "disabled"}>🗡️ こうげき</button>
-          <button class="btn btn2" id="btnGuard" ${canAct ? "" : "disabled"}>🛡️ ぼうぎょ</button>
-          <button class="btn btn2" id="btnSkill" ${canAct ? "" : "disabled"}>✨ とくぎ</button>
-          <button class="btn" id="btnCapture" ${canCapture ? "" : "disabled"}>🫙 捕獲</button>
+        <!-- 中：ログ（ここだけスクロール） -->
+        <div class="battle-mid">
+          <div class="card battle-log-wrap">
+            <div class="h3">ログ</div>
+            <div class="muted" id="battleLast"></div>
+            <pre class="log" id="logBattle">${(state.battle.log||[]).join("\n")}</pre>
+          </div>
         </div>
 
-        <div class="sep"></div>
+        <!-- 下：コマンド（画面下に固定するのはCSS側） -->
+        <div class="battle-bottom">
+          <div class="card">
+            <div class="h2">⚔️ バトル</div>
+            <div class="muted">遭遇 → 開始 → コマンド。勝ったら捕獲。</div>
 
-        <div class="grid2">
-          <button class="btn btn2" id="btnHealBattle">🩹 自分を回復</button>
-          <button class="btn btn2" id="btnSaveBattle">💾 保存</button>
+            <div class="sep"></div>
+
+            <div class="grid2">
+              <button class="btn" id="btnSpawn">🌿 遭遇する</button>
+              <button class="btn btn2" id="btnStartBattle" ${wild ? "" : "disabled"}>⚔️ 戦う（開始）</button>
+            </div>
+
+            <div class="sep"></div>
+
+            <div class="grid2 battle-commands">
+              <button class="btn btn2" id="btnAtk" ${canAct ? "" : "disabled"}>🗡️ こうげき</button>
+              <button class="btn btn2" id="btnGuard" ${canAct ? "" : "disabled"}>🛡️ ぼうぎょ</button>
+              <button class="btn btn2" id="btnSkill" ${canAct ? "" : "disabled"}>✨ とくぎ</button>
+              <button class="btn" id="btnCapture" ${canCapture ? "" : "disabled"}>🫙 捕獲</button>
+            </div>
+
+            <div class="sep"></div>
+
+            <div class="grid2">
+              <button class="btn btn2" id="btnHealBattle">🩹 自分を回復</button>
+              <button class="btn btn2" id="btnSaveBattle">💾 保存</button>
+            </div>
+          </div>
         </div>
+
       </div>
-    </div>
+    `;
+  }
 
-  </div>
-`;
+  // =====================================================
+  // バトル補助：ログ最下部へスクロール＋直近行表示
+  // 呼び出しタイミング：render() の最後（battle画面のとき）
+  // =====================================================
+  function postRenderBattle(state){
+    const logEl = document.getElementById("logBattle");
+    if(logEl) logEl.scrollTop = logEl.scrollHeight;
 
+    const lastEl = document.getElementById("battleLast");
+    if(lastEl){
+      const logs = state.battle.log || [];
+      lastEl.textContent = logs.length ? ("直近：" + logs[logs.length-1]) : "";
+    }
+  }
+
+  // =====================================================
+  // 画面：ガチャ
+  // =====================================================
   function screenGacha(state){
     const last = state.gacha?.last || null;
     const lastHtml = last
@@ -264,7 +342,7 @@
     return `
       <div class="card">
         <div class="h2">🎲 ガチャ</div>
-        <div class="muted">まずは簡易。1回10🪙。伝説も ${ (LEGENDARY_RATE*100).toFixed(1) }% で混ざる。</div>
+        <div class="muted">まずは簡易。1回10🪙。伝説も ${(LEGENDARY_RATE*100).toFixed(1)}%で混ざる。</div>
 
         <div class="sep"></div>
 
@@ -281,6 +359,9 @@
     `;
   }
 
+  // =====================================================
+  // 画面：図鑑
+  // =====================================================
   function screenDex(state){
     const rows = SPECIES.map(s=>{
       const owned = state.bugs.filter(b=>b.specId===s.id).length;
@@ -312,6 +393,9 @@
     `;
   }
 
+  // =====================================================
+  // 画面：設定
+  // =====================================================
   function screenSettings(state){
     return `
       <div class="card">
@@ -334,6 +418,9 @@
     `;
   }
 
+  // =====================================================
+  // 画面ごとのイベント紐付け
+  // =====================================================
   function bindScreenEvents(state){
     // HOME
     document.querySelectorAll("[data-go]").forEach(btn => {
@@ -397,8 +484,10 @@
     }
     const btnAtk = $("#btnAtk");
     if(btnAtk) btnAtk.addEventListener("click", () => window.MushiCore.myAct(state, "attack"));
+
     const btnGuard = $("#btnGuard");
     if(btnGuard) btnGuard.addEventListener("click", () => window.MushiCore.myAct(state, "guard"));
+
     const btnSkill = $("#btnSkill");
     if(btnSkill) btnSkill.addEventListener("click", () => window.MushiCore.myAct(state, "skill"));
 
@@ -409,6 +498,7 @@
         if(ok) toast("捕獲成功");
       });
     }
+
     const btnHealBattle = $("#btnHealBattle");
     if(btnHealBattle){
       btnHealBattle.addEventListener("click", () => {
@@ -416,9 +506,13 @@
         toast("回復した");
       });
     }
+
     const btnSaveBattle = $("#btnSaveBattle");
     if(btnSaveBattle){
-      btnSaveBattle.addEventListener("click", () => { save(state); toast("保存した"); });
+      btnSaveBattle.addEventListener("click", () => {
+        save(state);
+        toast("保存した");
+      });
     }
 
     // GACHA
@@ -440,12 +534,20 @@
     }
     const btnSaveGacha = $("#btnSaveGacha");
     if(btnSaveGacha){
-      btnSaveGacha.addEventListener("click", () => { save(state); toast("保存した"); });
+      btnSaveGacha.addEventListener("click", () => {
+        save(state);
+        toast("保存した");
+      });
     }
 
     // SETTINGS
     const btnSaveSet = $("#btnSaveSet");
-    if(btnSaveSet) btnSaveSet.addEventListener("click", () => { save(state); toast("保存した"); });
+    if(btnSaveSet){
+      btnSaveSet.addEventListener("click", () => {
+        save(state);
+        toast("保存した");
+      });
+    }
 
     const btnResetSet = $("#btnResetSet");
     if(btnResetSet){
@@ -457,11 +559,16 @@
     }
   }
 
+  // =====================================================
+  // render本体：routeに応じて画面HTML差し替え
+  // =====================================================
   function render(state){
     renderTop(state);
     renderTabs(state);
 
     const view = $("#view");
+    if(!view) return;
+
     if(state.route === "home") view.innerHTML = screenHome(state);
     else if(state.route === "train") view.innerHTML = screenTrain(state);
     else if(state.route === "battle") view.innerHTML = screenBattle(state);
@@ -471,6 +578,9 @@
     else view.innerHTML = screenHome(state);
 
     bindScreenEvents(state);
+
+    // バトル画面のときだけログ追従
+    if(state.route === "battle") postRenderBattle(state);
   }
 
   window.MushiUI = { render, toast };
