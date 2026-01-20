@@ -197,53 +197,61 @@
     `;
   }
 
-  function screenBattle(state){
-    const me = getSelected(state);
-    const wild = state.wild;
-    const canAct = !!(wild && state.battle.active && !state.battle.over && state.battle.turn==="me");
-    const canCapture = !!(wild && state.battle.active && state.battle.over && wild.hp<=0);
+  return `
+  <div class="battle">
 
-    return `
-      <div class="row">
-        <div class="card">
-          <div class="h2">⚔️ バトル</div>
-          <div class="muted">遭遇 → 戦う（開始） → コマンド。勝ったら捕獲。</div>
-
-          <div class="sep"></div>
-
-          <div class="grid2">
-            <button class="btn" id="btnSpawn">🌿 遭遇する</button>
-            <button class="btn btn2" id="btnStartBattle" ${wild ? "" : "disabled"}>⚔️ 戦う（開始）</button>
-          </div>
-
-          <div class="sep"></div>
-
-          <div class="grid2">
-            <button class="btn btn2" id="btnAtk" ${canAct ? "" : "disabled"}>🗡️ こうげき</button>
-            <button class="btn btn2" id="btnGuard" ${canAct ? "" : "disabled"}>🛡️ ぼうぎょ</button>
-            <button class="btn btn2" id="btnSkill" ${canAct ? "" : "disabled"}>✨ とくぎ</button>
-            <button class="btn" id="btnCapture" ${canCapture ? "" : "disabled"}>🫙 捕獲</button>
-          </div>
-
-          <div class="sep"></div>
-          <div class="grid2">
-            <button class="btn btn2" id="btnHealBattle">🩹 自分を回復</button>
-            <button class="btn btn2" id="btnSaveBattle">💾 保存</button>
-          </div>
-        </div>
-
+    <div class="battle-top">
+      <div class="mini-card">
+        <div class="h3">🧍 自分</div>
         ${renderBugCard(me, state)}
       </div>
 
-      <div class="row">
-        ${wild ? renderWildCard(wild) : `<div class="card"><div class="h3">野生ムシ</div><div class="muted">まだいない。遭遇してね。</div></div>`}
-        <div class="card">
-          <div class="h3">ログ</div>
-          <pre class="log" id="logBattle">${(state.battle.log||[]).join("\n")}</pre>
+      <div class="mini-card">
+        <div class="h3">🌿 野生</div>
+        ${wild ? renderWildCard(wild) : `<div class="muted">まだいない。遭遇してね。</div>`}
+      </div>
+    </div>
+
+    <div class="battle-mid">
+      <div class="card battle-log-wrap">
+        <div class="h3">ログ</div>
+        <div class="muted" id="battleLast"></div>
+        <pre class="log" id="logBattle">${(state.battle.log||[]).join("\n")}</pre>
+      </div>
+    </div>
+
+    <div class="battle-bottom">
+      <div class="card">
+        <div class="h2">⚔️ バトル</div>
+        <div class="muted">遭遇 → 開始 → コマンド。勝ったら捕獲。</div>
+
+        <div class="sep"></div>
+
+        <div class="grid2">
+          <button class="btn" id="btnSpawn">🌿 遭遇する</button>
+          <button class="btn btn2" id="btnStartBattle" ${wild ? "" : "disabled"}>⚔️ 戦う（開始）</button>
+        </div>
+
+        <div class="sep"></div>
+
+        <div class="grid2 battle-commands">
+          <button class="btn btn2" id="btnAtk" ${canAct ? "" : "disabled"}>🗡️ こうげき</button>
+          <button class="btn btn2" id="btnGuard" ${canAct ? "" : "disabled"}>🛡️ ぼうぎょ</button>
+          <button class="btn btn2" id="btnSkill" ${canAct ? "" : "disabled"}>✨ とくぎ</button>
+          <button class="btn" id="btnCapture" ${canCapture ? "" : "disabled"}>🫙 捕獲</button>
+        </div>
+
+        <div class="sep"></div>
+
+        <div class="grid2">
+          <button class="btn btn2" id="btnHealBattle">🩹 自分を回復</button>
+          <button class="btn btn2" id="btnSaveBattle">💾 保存</button>
         </div>
       </div>
-    `;
-  }
+    </div>
+
+  </div>
+`;
 
   function screenGacha(state){
     const last = state.gacha?.last || null;
