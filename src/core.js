@@ -324,6 +324,7 @@
     }
 
     state.battle.turn = (state.battle.turn==="me") ? "wild" : "me";
+    window.MushiState.notify();
     if(state.battle.turn==="wild") wildAct(state);
   }
 
