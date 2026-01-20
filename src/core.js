@@ -160,155 +160,149 @@
     return state.bugs.find(b=>b.uid===state.selectedUid) || state.bugs[0];
   }
 
-  // ===== 育成 =====
-  function gainExp(state, bug, amount, sourceMode="atk"){
-  bug.exp += amount;
+    // ===== 育成 =====
 
-  while(bug.exp >= expToNext(bug.level)){
-    bug.exp -= expToNext(bug.level);
-    bug.level++;
+  // トレ回数：最大3、1時間で1回復
+  const TRAIN_MAX = 3;
+  const TRAIN_REGEN_MS = 60 * 60 * 1000;
 
-    const g = bug.growthMult || 1;
+  // 成功率とEXP（ここで50〜80%に調整できる）
+  const TRAIN_CFG = {
+    atk:   { label:"ATK寄せ",  success:0.80, expMin:6, expMax:10 },
+    def:   { label:"DEF寄せ",  success:0.80, expMin:6, expMax:10 },
+    spd:   { label:"SPD寄せ",  success:0.70, expMin:6, expMax:10 },
+    trait: { label:"特性トレ", success:0.55, expMin:5, expMax:9  },
+  };
 
-    // -----------------------------
-    // レベルアップ時の成長（寄せで伸びが変わる）
-    // ここが「ゲーム性」になる部分
-    // -----------------------------
+  function ensureTrain(state){
+    if(!state.train){
+      state.train = { points: TRAIN_MAX, last: Date.now() };
+    }
+    if(typeof state.train.points !== "number") state.train.points = TRAIN_MAX;
+    if(typeof state.train.last !== "number") state.train.last = Date.now();
+  }
 
-    // HPは毎回ちょい伸び（好みで調整）
-    bug.iv.hp += r(0,1) * g;
+  function tickTrain(state){
+    ensureTrain(state);
+    const now = Date.now();
 
-    // 基本：そこそこ伸びる
-    let atkChance = 0.70;
-    let defChance = 0.70;
-    let spdChance = 0.60;
-
-    // 寄せ：対象だけ伸びやすくする
-    if(sourceMode === "atk"){
-      atkChance = 0.90;
-      defChance = 0.60;
-      spdChance = 0.55;
-    }else if(sourceMode === "def"){
-      atkChance = 0.60;
-      defChance = 0.90;
-      spdChance = 0.55;
-    }else if(sourceMode === "spd"){
-      atkChance = 0.60;
-      defChance = 0.60;
-      spdChance = 0.85;
-    }else if(sourceMode === "trait"){
-      // 特性トレは「伸びはやや控えめ＆均し」でもいい
-      atkChance = 0.65;
-      defChance = 0.65;
-      spdChance = 0.60;
+    if(state.train.points >= TRAIN_MAX){
+      state.train.last = now; // 満タンなら基準更新
+      return;
     }
 
-    // 伸び量：寄せ対象は +1が出やすいようにする（好みで調整）
-    const grow1 = () => (r(0,1) * g);         // 0 or 1
-    const grow2 = () => ((r(0,1) + r(0,1)) * g); // 0〜2（寄せボーナス）
+    const elapsed = now - state.train.last;
+    if(elapsed < TRAIN_REGEN_MS) return;
 
-    if(Math.random() < atkChance) bug.iv.atk += (sourceMode==="atk" ? grow2() : grow1());
-    if(Math.random() < defChance) bug.iv.def += (sourceMode==="def" ? grow2() : grow1());
-    if(Math.random() < spdChance) bug.iv.spd += (sourceMode==="spd" ? grow2() : grow1());
+    const add = Math.floor(elapsed / TRAIN_REGEN_MS);
+    state.train.points = Math.min(TRAIN_MAX, state.train.points + add);
+    state.train.last += add * TRAIN_REGEN_MS;
+  }
 
-    // -----------------------------
-    // 特性獲得抽選（LvUP時）
-    //  特性トレ: 1/50
-    //  それ以外: 1/100
-    // -----------------------------
-    const sp = SPECIES.find(s=>s.id===bug.specId);
+  // mode: "atk" | "def" | "spd" | "trait"
+  function trainSelected(state, mode="atk"){
+    const me = getSelected(state);
+    if(me.hp <= 0){
+      pushLog(state, "瀕死でトレーニングは無理。休ませて。");
+      return;
+    }
 
-    if(!bug.trait){
-      const rate = (sourceMode === "trait") ? (1/50) : (1/100);
-      if(Math.random() < rate){
-        // speciesごとのtraitPoolを使う（タイプ別特性はここで担保）
-        if(sp && Array.isArray(sp.traitPool) && sp.traitPool.length){
+    tickTrain(state);
+    if(state.train.points <= 0){
+      pushLog(state, "🏋️ トレ回数がない（1時間で1回復 / 最大3）");
+      return;
+    }
+
+    const cfg = TRAIN_CFG[mode] || TRAIN_CFG.atk;
+
+    // 1回消費
+    state.train.points -= 1;
+
+    // 成否
+    const ok = Math.random() < cfg.success;
+
+    // EXP（失敗でもちょい入る）
+    const gain = ok
+      ? (cfg.expMin + r(0, cfg.expMax - cfg.expMin))
+      : (2 + r(0,2));
+
+    pushLog(state, `🏋️ ${me.nickname} は ${cfg.label}！ ${ok ? "成功" : "失敗"} / EXP +${gain}`);
+
+    // 寄せ情報をgainExpに渡す
+    gainExp(state, me, gain, mode);
+  }
+
+  function gainExp(state, bug, amount, sourceMode="atk"){
+    bug.exp += amount;
+
+    while(bug.exp >= expToNext(bug.level)){
+      bug.exp -= expToNext(bug.level);
+      bug.level++;
+
+      const g = bug.growthMult || 1;
+
+      // HPは毎回ちょい伸び
+      bug.iv.hp += r(0,1) * g;
+
+      // 基本確率
+      let atkChance = 0.70;
+      let defChance = 0.70;
+      let spdChance = 0.60;
+
+      // 寄せ補正
+      if(sourceMode === "atk"){
+        atkChance = 0.90; defChance = 0.60; spdChance = 0.55;
+      }else if(sourceMode === "def"){
+        atkChance = 0.60; defChance = 0.90; spdChance = 0.55;
+      }else if(sourceMode === "spd"){
+        atkChance = 0.60; defChance = 0.60; spdChance = 0.85;
+      }else if(sourceMode === "trait"){
+        atkChance = 0.65; defChance = 0.65; spdChance = 0.60;
+      }else{
+        // battle / gacha / other は基本に戻す
+        atkChance = 0.70; defChance = 0.70; spdChance = 0.60;
+      }
+
+      // 伸び量：寄せ対象だけ 0〜2（他は0〜1）
+      const grow1 = () => (r(0,1) * g);
+      const grow2 = () => ((r(0,1) + r(0,1)) * g);
+
+      if(Math.random() < atkChance) bug.iv.atk += (sourceMode==="atk" ? grow2() : grow1());
+      if(Math.random() < defChance) bug.iv.def += (sourceMode==="def" ? grow2() : grow1());
+      if(Math.random() < spdChance) bug.iv.spd += (sourceMode==="spd" ? grow2() : grow1());
+
+      // 特性抽選：特性トレLvUP=1/50、それ以外=1/100
+      const sp = SPECIES.find(s=>s.id===bug.specId);
+      if(!bug.trait){
+        const rate = (sourceMode === "trait") ? (1/50) : (1/100);
+        if(Math.random() < rate && sp && Array.isArray(sp.traitPool) && sp.traitPool.length){
           bug.trait = pick(sp.traitPool);
           pushLog(state, `🌟 特性が覚醒！「${bug.trait}」`);
         }
       }
+
+      recalc(bug);
+      bug.hp = bug.hpMax;
+
+      const tag =
+        sourceMode==="atk" ? "ATK寄せ" :
+        sourceMode==="def" ? "DEF寄せ" :
+        sourceMode==="spd" ? "SPD寄せ" :
+        sourceMode==="trait" ? "特性トレ" :
+        sourceMode==="battle" ? "バトル" : "成長";
+
+      pushLog(state, `⬆️ レベルアップ！ Lv.${bug.level}${bug.isLegendary?"（伝説成長）":""} / ${tag}`);
     }
 
     recalc(bug);
-    bug.hp = bug.hpMax;
-
-    // ログ（どの寄せで上がったか分かるように）
-    const tag =
-      sourceMode==="atk" ? "ATK寄せ" :
-      sourceMode==="def" ? "DEF寄せ" :
-      sourceMode==="spd" ? "SPD寄せ" :
-      sourceMode==="trait" ? "特性トレ" : "トレ";
-
-    pushLog(state, `⬆️ レベルアップ！ Lv.${bug.level}${bug.isLegendary?"（伝説成長）":""} / ${tag}`);
   }
 
-  recalc(bug);
-}
-
-  function trainSelected(state){
-    // =============================
-// 育成：トレーニング（mode付き）
-// mode: "atk" | "def" | "spd" | "trait"
-// =============================
-const TRAIN_MAX = 3;
-const TRAIN_REGEN_MS = 60 * 60 * 1000;
-
-const TRAIN_CFG = {
-  atk:   { label:"ATK寄せ",   success:0.80, expMin:6, expMax:10 },
-  def:   { label:"DEF寄せ",   success:0.80, expMin:6, expMax:10 },
-  spd:   { label:"SPD寄せ",   success:0.70, expMin:6, expMax:10 },
-  trait: { label:"特性トレ",  success:0.55, expMin:5, expMax:9  },
-};
-
-function ensureTrain(state){
-  if(!state.train){
-    state.train = { points: TRAIN_MAX, last: Date.now() };
+  function healSelected(state){
+    const me = getSelected(state);
+    me.hp = me.hpMax;
+    me.status = { poison:0, slow:0, guard:0, critBuff:0, firstTurn:true };
+    pushLog(state, `🩹 ${me.nickname} は元気になった`);
   }
-  if(typeof state.train.points !== "number") state.train.points = TRAIN_MAX;
-  if(typeof state.train.last !== "number") state.train.last = Date.now();
-}
-
-function tickTrain(state){
-  ensureTrain(state);
-  const now = Date.now();
-  if(state.train.points >= TRAIN_MAX){
-    state.train.last = now;
-    return;
-  }
-  const elapsed = now - state.train.last;
-  if(elapsed < TRAIN_REGEN_MS) return;
-  const add = Math.floor(elapsed / TRAIN_REGEN_MS);
-  state.train.points = Math.min(TRAIN_MAX, state.train.points + add);
-  state.train.last += add * TRAIN_REGEN_MS;
-}
-
-function trainSelected(state, mode="atk"){
-  const me = getSelected(state);
-
-  if(me.hp <= 0){
-    pushLog(state, "瀕死でトレーニングは無理。休ませて。");
-    return;
-  }
-
-  tickTrain(state);
-  if(state.train.points <= 0){
-    pushLog(state, "🏋️ トレ回数がない（1時間で1回復 / 最大3）");
-    return;
-  }
-
-  const cfg = TRAIN_CFG[mode] || TRAIN_CFG.atk;
-
-  // 1回消費
-  state.train.points -= 1;
-
-  const ok = Math.random() < cfg.success;
-  const gain = ok ? (cfg.expMin + r(0, cfg.expMax - cfg.expMin)) : 2 + r(0,2);
-
-  pushLog(state, `🏋️ ${me.nickname} は ${cfg.label}！ ${ok ? "成功" : "失敗"} / EXP +${gain}`);
-
-  // ★重要：gainExpに「どのトレで増えたEXPか」を渡す
-  gainExp(state, me, gain, mode);
-}
 
   function healSelected(state){
     const me = getSelected(state);
@@ -410,7 +404,7 @@ function trainSelected(state, mode="atk"){
         const baseGain = 8 + wild.level*3;
         const mult = wild.isLegendary ? LEGENDARY_WIN_EXP_MULT : 1;
         const gain = baseGain * mult;
-        gainExp(state, me, gain);
+        gainExp(state, me, gain "battle");
 
         const coinGain = 5 + wild.level + (wild.isLegendary ? 20 : 0);
         state.coins += coinGain;
