@@ -1,0 +1,103 @@
+:root{
+  --bg:#0b0f14; --card:#101826; --card2:#0e1623;
+  --line:#1d2a3a; --line2:#2b4666;
+  --text:#e8eef7; --muted:#a8b3c5;
+  --good:#36d27a; --bad:#ff5a7a; --blue:#2fa8ff; --gold:#e7c14b;
+  --r:14px;
+}
+
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0; background:var(--bg); color:var(--text);
+  font-family:system-ui,-apple-system,Segoe UI,Roboto,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif;
+}
+
+.topbar{
+  position:sticky; top:0; z-index:10;
+  display:flex; align-items:center; justify-content:space-between;
+  padding:12px 14px; background:#111a24; border-bottom:1px solid var(--line);
+}
+.topbar__title{font-weight:900; letter-spacing:.2px}
+.chip{
+  border:1px solid var(--line2); background:rgba(255,255,255,.03);
+  border-radius:999px; padding:6px 10px; font-size:12px; color:var(--text);
+}
+
+.app{padding:12px 12px 86px; max-width:920px; margin:0 auto;}
+.view{min-height:calc(100vh - 60px - 86px);}
+
+.card{
+  background:var(--card); border:1px solid var(--line);
+  border-radius:var(--r); padding:12px;
+}
+.card + .card{margin-top:12px}
+.row{display:flex; gap:12px; flex-wrap:wrap}
+.row > .card{flex:1; min-width:280px}
+.muted{color:var(--muted); font-size:12px}
+.h2{font-weight:900; margin:0 0 6px}
+.h3{font-weight:800; margin:0 0 6px; font-size:14px}
+.sep{height:1px; background:var(--line); margin:10px 0}
+
+.grid2{display:grid; grid-template-columns:1fr 1fr; gap:8px}
+.grid3{display:grid; grid-template-columns:repeat(3,1fr); gap:8px}
+
+select,input{
+  width:100%; padding:10px; border-radius:12px;
+  border:1px solid var(--line2); background:var(--card2); color:var(--text);
+}
+
+.btn{
+  width:100%;
+  border-radius:12px; padding:10px 12px;
+  border:1px solid var(--line2);
+  background:#1e2f45; color:var(--text);
+  font-weight:900; cursor:pointer;
+}
+.btn:disabled{opacity:.5; cursor:not-allowed}
+.btn2{background:#142033}
+.btnDanger{background:#3a1f24; border-color:#6b2b36}
+
+.tag{
+  display:inline-block; padding:2px 8px;
+  border:1px solid var(--line2); border-radius:999px;
+  font-size:12px; color:#cfe2ff; margin-right:6px;
+}
+.tagLegend{border-color:var(--gold); color:#ffeaa7}
+
+.bar{height:10px; background:#0c1320; border:1px solid #22364f; border-radius:999px; overflow:hidden}
+.fill{height:100%; width:50%; background:var(--blue)}
+.fillHp{background:var(--good)}
+.fillBad{background:var(--bad)}
+
+.log{
+  white-space:pre-wrap; background:var(--card2);
+  border:1px solid #22364f; border-radius:12px;
+  padding:10px; margin:10px 0 0; font-size:12px; line-height:1.35;
+  max-height:240px; overflow:auto;
+}
+
+.tabbar{
+  position:fixed; left:0; right:0; bottom:0; z-index:20;
+  padding:8px 10px calc(8px + env(safe-area-inset-bottom));
+  background:rgba(16,24,38,.95);
+  border-top:1px solid var(--line);
+  display:grid; grid-template-columns:repeat(6,1fr); gap:8px;
+  backdrop-filter: blur(10px);
+}
+.tab{
+  border:1px solid var(--line2); border-radius:14px;
+  background:rgba(255,255,255,.03); color:var(--muted);
+  padding:10px 6px; font-weight:900; font-size:12px;
+  text-align:center; cursor:pointer; user-select:none;
+}
+.tab.active{background:rgba(47,168,255,.12); color:var(--text); border-color:rgba(47,168,255,.35)}
+
+.toast{
+  position:fixed; left:50%; bottom:96px; transform:translateX(-50%);
+  background:rgba(0,0,0,.75); color:var(--text);
+  border:1px solid rgba(255,255,255,.15); border-radius:999px;
+  padding:10px 14px; font-weight:800; font-size:12px;
+  opacity:0; pointer-events:none; transition:opacity .18s ease;
+}
+.toast.show{opacity:1}
