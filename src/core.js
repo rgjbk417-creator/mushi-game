@@ -189,25 +189,69 @@
   }
 
   function trainSelected(state){
-    const me = getSelected(state);
-    if(me.hp <= 0){
-      pushLog(state, "瀕死でトレーニングは無理。休ませて。");
-      return;
-    }
-    const gain = 6 + r(0,4);
-    pushLog(state, `🏋️ ${me.nickname} は鍛えた！ EXP +${gain}`);
-    gainExp(state, me, gain);
+    // =============================
+// 育成：トレーニング（mode付き）
+// mode: "atk" | "def" | "spd" | "trait"
+// =============================
+const TRAIN_MAX = 3;
+const TRAIN_REGEN_MS = 60 * 60 * 1000;
 
-    if(Math.random() < 0.25){
-      const g = me.growthMult || 1;
-      const keys = ["hp","atk","def","spd"];
-      const k = pick(keys);
-      me.iv[k] += 1 * g;
-      recalc(me);
-      me.hp = me.hpMax;
-      pushLog(state, `📈 伸びた：${k.toUpperCase()} +${1*g}${me.isLegendary ? "（伝説）" : ""}`);
-    }
+const TRAIN_CFG = {
+  atk:   { label:"ATK寄せ",   success:0.80, expMin:6, expMax:10 },
+  def:   { label:"DEF寄せ",   success:0.80, expMin:6, expMax:10 },
+  spd:   { label:"SPD寄せ",   success:0.70, expMin:6, expMax:10 },
+  trait: { label:"特性トレ",  success:0.55, expMin:5, expMax:9  },
+};
+
+function ensureTrain(state){
+  if(!state.train){
+    state.train = { points: TRAIN_MAX, last: Date.now() };
   }
+  if(typeof state.train.points !== "number") state.train.points = TRAIN_MAX;
+  if(typeof state.train.last !== "number") state.train.last = Date.now();
+}
+
+function tickTrain(state){
+  ensureTrain(state);
+  const now = Date.now();
+  if(state.train.points >= TRAIN_MAX){
+    state.train.last = now;
+    return;
+  }
+  const elapsed = now - state.train.last;
+  if(elapsed < TRAIN_REGEN_MS) return;
+  const add = Math.floor(elapsed / TRAIN_REGEN_MS);
+  state.train.points = Math.min(TRAIN_MAX, state.train.points + add);
+  state.train.last += add * TRAIN_REGEN_MS;
+}
+
+function trainSelected(state, mode="atk"){
+  const me = getSelected(state);
+
+  if(me.hp <= 0){
+    pushLog(state, "瀕死でトレーニングは無理。休ませて。");
+    return;
+  }
+
+  tickTrain(state);
+  if(state.train.points <= 0){
+    pushLog(state, "🏋️ トレ回数がない（1時間で1回復 / 最大3）");
+    return;
+  }
+
+  const cfg = TRAIN_CFG[mode] || TRAIN_CFG.atk;
+
+  // 1回消費
+  state.train.points -= 1;
+
+  const ok = Math.random() < cfg.success;
+  const gain = ok ? (cfg.expMin + r(0, cfg.expMax - cfg.expMin)) : 2 + r(0,2);
+
+  pushLog(state, `🏋️ ${me.nickname} は ${cfg.label}！ ${ok ? "成功" : "失敗"} / EXP +${gain}`);
+
+  // ★重要：gainExpに「どのトレで増えたEXPか」を渡す
+  gainExp(state, me, gain, mode);
+}
 
   function healSelected(state){
     const me = getSelected(state);
