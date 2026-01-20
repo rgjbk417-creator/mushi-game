@@ -1,21 +1,24 @@
 // src/core.js
 (() => {
-  const {
-    pushLog, clearLog,
-  } = window.MushiState;
+  const { pushLog, clearLog } = window.MushiState;
 
-  // ===== 要望（伝説仕様） =====
+  // =========================================================
+  // [全体設定] 伝説仕様
+  // =========================================================
   const LEGENDARY_RATE = 0.001;        // 0.1% = 1/1000
   const LEGENDARY_STAT_MULT = 3;       // 能力値3倍
   const LEGENDARY_WIN_EXP_MULT = 5;    // 勝利EXP 5倍
   const LEGENDARY_GROWTH_MULT = 3;     // 成長3倍
 
+  // =========================================================
+  // [図鑑/種族データ]
+  // =========================================================
   const SPECIES = [
-    { id:"kabuto", name:"カブト", type:"甲", base:{hp:28, atk:8, def:7, spd:5}, skill:"ツノ突き", traitPool:["硬化","突進","不屈"] },
-    { id:"kuwa",   name:"クワガタ", type:"刃", base:{hp:24, atk:9, def:6, spd:7}, skill:"ハサミ斬り", traitPool:["急所狙い","連撃","夜行性"] },
-    { id:"bee",    name:"ハチ", type:"飛", base:{hp:20, atk:7, def:4, spd:10}, skill:"毒針", traitPool:["毒","回避","先制"] },
-    { id:"spider", name:"クモ", type:"糸", base:{hp:22, atk:6, def:6, spd:8}, skill:"糸縛り", traitPool:["拘束","吸収","狡猾"] },
-    { id:"mantis", name:"カマキリ", type:"刃", base:{hp:21, atk:10, def:4, spd:9}, skill:"鎌乱舞", traitPool:["急所狙い","狂戦士","連撃"] },
+    { id:"kabuto", name:"カブト",   type:"甲", base:{hp:28, atk:8,  def:7, spd:5},  skill:"ツノ突き", traitPool:["硬化","突進","不屈"] },
+    { id:"kuwa",   name:"クワガタ", type:"刃", base:{hp:24, atk:9,  def:6, spd:7},  skill:"ハサミ斬り", traitPool:["急所狙い","連撃","夜行性"] },
+    { id:"bee",    name:"ハチ",     type:"飛", base:{hp:20, atk:7,  def:4, spd:10}, skill:"毒針", traitPool:["毒","回避","先制"] },
+    { id:"spider", name:"クモ",     type:"糸", base:{hp:22, atk:6,  def:6, spd:8},  skill:"糸縛り", traitPool:["拘束","吸収","狡猾"] },
+    { id:"mantis", name:"カマキリ", type:"刃", base:{hp:21, atk:10, def:4, spd:9},  skill:"鎌乱舞", traitPool:["急所狙い","狂戦士","連撃"] },
   ];
 
   const TYPE_EFFECT = {
@@ -41,6 +44,9 @@
     "狂戦士": { desc:"HP減るほど火力UP" },
   };
 
+  // =========================================================
+  // [ユーティリティ]
+  // =========================================================
   const r = (min,max) => Math.floor(Math.random()*(max-min+1))+min;
   const clamp = (x,a,b) => Math.max(a, Math.min(b, x));
   const pick = (arr) => arr[Math.floor(Math.random()*arr.length)];
@@ -110,8 +116,14 @@
     return bug;
   }
 
+  function getSelected(state){
+    return state.bugs.find(b=>b.uid===state.selectedUid) || state.bugs[0];
+  }
+
+  // =========================================================
+  // [セーブ互換/初期化]
+  // =========================================================
   function ensureCoreState(state){
-    // 旧セーブ互換にも効く初期化
     if(!state.route) state.route = "home";
     if(typeof state.coins !== "number") state.coins = 0;
     if(!Array.isArray(state.bugs)) state.bugs = [];
@@ -120,7 +132,12 @@
     if(!Array.isArray(state.battle.log)) state.battle.log = [];
     if(!state.gacha) state.gacha = { last:null };
 
-    // bugs が空なら初期個体を付与
+    // トレ回数管理（最大3/1h回復）
+    if(!state.train) state.train = { points: 3, last: Date.now() };
+    if(typeof state.train.points !== "number") state.train.points = 3;
+    if(typeof state.train.last !== "number") state.train.last = Date.now();
+
+    // 初期個体
     if(state.bugs.length === 0){
       const a = makeBug("kabuto", 2, false, false);
       const b = makeBug("kuwa", 1, false, false);
@@ -129,7 +146,7 @@
       state.selectedUid = a.uid;
     }
 
-    // 個体の整形
+    // 個体整形
     for(const b of state.bugs){
       b.isLegendary = !!b.isLegendary;
       b.statMult = b.isLegendary ? LEGENDARY_STAT_MULT : (b.statMult || 1);
@@ -143,7 +160,7 @@
       state.selectedUid = state.bugs[0].uid;
     }
 
-    // wild 互換
+    // wild互換
     if(state.wild){
       state.wild.isLegendary = !!state.wild.isLegendary;
       state.wild.statMult = state.wild.isLegendary ? LEGENDARY_STAT_MULT : (state.wild.statMult || 1);
@@ -153,20 +170,18 @@
       if(typeof state.wild.hp !== "number") state.wild.hp = state.wild.hpMax;
     }
 
+    // 起動時にトレ回数回復も反映
+    tickTrain(state);
+
     return state;
   }
 
-  function getSelected(state){
-    return state.bugs.find(b=>b.uid===state.selectedUid) || state.bugs[0];
-  }
-
-    // ===== 育成 =====
-
-  // トレ回数：最大3、1時間で1回復
+  // =========================================================
+  // [育成] 寄せトレ/回数3/1時間回復/特性抽選
+  // =========================================================
   const TRAIN_MAX = 3;
   const TRAIN_REGEN_MS = 60 * 60 * 1000;
 
-  // 成功率とEXP（ここで50〜80%に調整できる）
   const TRAIN_CFG = {
     atk:   { label:"ATK寄せ",  success:0.80, expMin:6, expMax:10 },
     def:   { label:"DEF寄せ",  success:0.80, expMin:6, expMax:10 },
@@ -187,7 +202,7 @@
     const now = Date.now();
 
     if(state.train.points >= TRAIN_MAX){
-      state.train.last = now; // 満タンなら基準更新
+      state.train.last = now;
       return;
     }
 
@@ -199,40 +214,8 @@
     state.train.last += add * TRAIN_REGEN_MS;
   }
 
-  // mode: "atk" | "def" | "spd" | "trait"
-  function trainSelected(state, mode="atk"){
-    const me = getSelected(state);
-    if(me.hp <= 0){
-      pushLog(state, "瀕死でトレーニングは無理。休ませて。");
-      return;
-    }
-
-    tickTrain(state);
-    if(state.train.points <= 0){
-      pushLog(state, "🏋️ トレ回数がない（1時間で1回復 / 最大3）");
-      return;
-    }
-
-    const cfg = TRAIN_CFG[mode] || TRAIN_CFG.atk;
-
-    // 1回消費
-    state.train.points -= 1;
-
-    // 成否
-    const ok = Math.random() < cfg.success;
-
-    // EXP（失敗でもちょい入る）
-    const gain = ok
-      ? (cfg.expMin + r(0, cfg.expMax - cfg.expMin))
-      : (2 + r(0,2));
-
-    pushLog(state, `🏋️ ${me.nickname} は ${cfg.label}！ ${ok ? "成功" : "失敗"} / EXP +${gain}`);
-
-    // 寄せ情報をgainExpに渡す
-    gainExp(state, me, gain, mode);
-  }
-
-  function gainExp(state, bug, amount, sourceMode="atk"){
+  // sourceMode: "atk" | "def" | "spd" | "trait" | "battle" | "other"
+  function gainExp(state, bug, amount, sourceMode="other"){
     bug.exp += amount;
 
     while(bug.exp >= expToNext(bug.level)){
@@ -244,12 +227,12 @@
       // HPは毎回ちょい伸び
       bug.iv.hp += r(0,1) * g;
 
-      // 基本確率
+      // 伸び確率（基本）
       let atkChance = 0.70;
       let defChance = 0.70;
       let spdChance = 0.60;
 
-      // 寄せ補正
+      // 寄せ補正（対象が伸びやすい）
       if(sourceMode === "atk"){
         atkChance = 0.90; defChance = 0.60; spdChance = 0.55;
       }else if(sourceMode === "def"){
@@ -259,7 +242,7 @@
       }else if(sourceMode === "trait"){
         atkChance = 0.65; defChance = 0.65; spdChance = 0.60;
       }else{
-        // battle / gacha / other は基本に戻す
+        // battle / other は基本のまま
         atkChance = 0.70; defChance = 0.70; spdChance = 0.60;
       }
 
@@ -297,11 +280,31 @@
     recalc(bug);
   }
 
-  function healSelected(state){
+  // mode: "atk" | "def" | "spd" | "trait"
+  function trainSelected(state, mode="atk"){
     const me = getSelected(state);
-    me.hp = me.hpMax;
-    me.status = { poison:0, slow:0, guard:0, critBuff:0, firstTurn:true };
-    pushLog(state, `🩹 ${me.nickname} は元気になった`);
+    if(me.hp <= 0){
+      pushLog(state, "瀕死でトレーニングは無理。休ませて。");
+      return;
+    }
+
+    tickTrain(state);
+    if(state.train.points <= 0){
+      pushLog(state, "🏋️ トレ回数がない（1時間で1回復 / 最大3）");
+      return;
+    }
+
+    const cfg = TRAIN_CFG[mode] || TRAIN_CFG.atk;
+
+    state.train.points -= 1;
+
+    const ok = Math.random() < cfg.success;
+    const gain = ok
+      ? (cfg.expMin + r(0, cfg.expMax - cfg.expMin))
+      : (2 + r(0,2));
+
+    pushLog(state, `🏋️ ${me.nickname} は ${cfg.label}！ ${ok ? "成功" : "失敗"} / EXP +${gain}`);
+    gainExp(state, me, gain, mode);
   }
 
   function healSelected(state){
@@ -311,7 +314,9 @@
     pushLog(state, `🩹 ${me.nickname} は元気になった`);
   }
 
-  // ===== バトル =====
+  // =========================================================
+  // [バトル]
+  // =========================================================
   function effectiveSpd(b){
     let s = b.spd;
     if(b.status.slow>0) s = Math.floor(s*0.75);
@@ -404,7 +409,9 @@
         const baseGain = 8 + wild.level*3;
         const mult = wild.isLegendary ? LEGENDARY_WIN_EXP_MULT : 1;
         const gain = baseGain * mult;
-        gainExp(state, me, gain "battle");
+
+        // 勝利EXPは "battle" タグで成長を基本扱いにする
+        gainExp(state, me, gain, "battle");
 
         const coinGain = 5 + wild.level + (wild.isLegendary ? 20 : 0);
         state.coins += coinGain;
@@ -426,6 +433,7 @@
   function myAct(state, kind){
     if(!state.wild){ pushLog(state, "野生がいない。遭遇してね。"); return; }
     if(!state.battle.active || state.battle.over) return;
+    if(state.battle.turn !== "me") return;
 
     const me = getSelected(state);
     const wild = state.wild;
@@ -479,6 +487,7 @@
   function wildAct(state){
     const wild = state.wild;
     if(!wild || !state.battle.active || state.battle.over) return;
+    if(state.battle.turn !== "wild") return;
 
     applyStartTurn(state, wild);
     if(wild.hp<=0){ endTurn(state); return; }
@@ -594,8 +603,9 @@
     }
   }
 
-  // ===== ガチャ（簡易）=====
-  // 10連とか演出は後で盛れる。まず「引ける」「増える」が大事。
+  // =========================================================
+  // [ガチャ]
+  // =========================================================
   function gachaPull(state, times=1){
     const cost = 10 * times;
     if(state.coins < cost){
@@ -606,13 +616,12 @@
 
     const results = [];
     for(let i=0;i<times;i++){
-      // ガチャでも伝説を出したいなら 0.1% で伝説
       const isLegendary = Math.random() < LEGENDARY_RATE;
-
       const spec = pick(SPECIES);
-      const lvl = isLegendary ? 1 : 1;
+      const lvl = 1;
 
       const b = makeBug(spec.id, lvl, false, isLegendary);
+
       // ガチャ産は特性少しつきやすい
       if(!b.trait && Math.random()<0.35){
         b.trait = pick(spec.traitPool);
@@ -629,6 +638,9 @@
     return results;
   }
 
+  // =========================================================
+  // [公開API]
+  // =========================================================
   window.MushiCore = {
     LEGENDARY_RATE,
     LEGENDARY_STAT_MULT,
@@ -637,16 +649,23 @@
     SPECIES,
     TRAITS,
     expToNext,
+
     ensureCoreState,
     getSelected,
     recalc,
     makeBug,
+
+    // 育成
     trainSelected,
     healSelected,
+
+    // バトル
     spawnWild,
     startBattle,
     myAct,
     tryCapture,
+
+    // ガチャ
     gachaPull,
   };
 })();
