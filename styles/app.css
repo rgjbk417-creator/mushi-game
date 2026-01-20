@@ -154,3 +154,13 @@ select,input{
   opacity: 0.85;
   margin: 4px 0 8px;
 }
+function postRenderBattle(state){
+  const logEl = document.getElementById("logBattle");
+  if(logEl) logEl.scrollTop = logEl.scrollHeight;
+
+  const lastEl = document.getElementById("battleLast");
+  if(lastEl){
+    const logs = state.battle.log || [];
+    lastEl.textContent = logs.length ? ("直近：" + logs[logs.length-1]) : "";
+  }
+}
