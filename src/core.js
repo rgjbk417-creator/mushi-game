@@ -381,39 +381,54 @@ function getEffectiveStats(state, mainBug){
     b.status.firstTurn = false;
   }
 
-  function calcDamage(att, def, basePower, isSkill=false){
-    let atk = att.atk;
-    let d = def.def;
+  function calcDamage(state, att, def, basePower, isSkill=false){
+  // サポ反映（自分側だけ）をATK/DEFに適用
+  const me = getSelected(state);
 
-    if(att.trait==="突進") atk = Math.floor(atk*1.1);
-    if(att.trait==="狂戦士"){
-      const missing = 1 - (att.hp/att.hpMax);
-      atk = Math.floor(atk * (1 + missing*0.35));
-    }
-    if(def.trait==="不屈" && def.hp/def.hpMax<=0.3) d = Math.floor(d*1.25);
+  let atk = att.atk;
+  let d   = def.def;
 
-    let dmg = (basePower + atk*1.15) - (d*0.9);
-    dmg = Math.max(1, Math.floor(dmg));
-
-    dmg = Math.floor(dmg * typeMul(att.type, def.type));
-
-    if(def.status.guard>0) dmg = Math.floor(dmg*0.6);
-    if(def.trait==="硬化") dmg = Math.floor(dmg*0.85);
-
-    if(def.trait==="回避" && Math.random()<0.12){
-      return { dmg:0, evaded:true, crit:false };
-    }
-
-    let critRate = isSkill ? 0.12 : 0.06;
-    if(att.trait==="急所狙い" && isSkill) critRate += 0.12;
-    if(att.status.critBuff>0) critRate += 0.18;
-
-    const crit = Math.random()<critRate;
-    if(crit) dmg = Math.floor(dmg*1.55);
-
-    return { dmg, evaded:false, crit };
+  // 攻撃側が「自分」なら、サポ反映ATKを使う
+  if(me && att && att.uid === me.uid){
+    const eff = getEffectiveStats(state, me);
+    atk = eff.atk;
   }
 
+  // 防御側が「自分」なら、サポ反映DEFを使う
+  if(me && def && def.uid === me.uid){
+    const eff = getEffectiveStats(state, me);
+    d = eff.def;
+  }
+
+  if(att.trait==="突進") atk = Math.floor(atk*1.1);
+  if(att.trait==="狂戦士"){
+    const missing = 1 - (att.hp/att.hpMax);
+    atk = Math.floor(atk * (1 + missing*0.35));
+  }
+  if(def.trait==="不屈" && def.hp/def.hpMax<=0.3) d = Math.floor(d*1.25);
+
+  let dmg = (basePower + atk*1.15) - (d*0.9);
+  dmg = Math.max(1, Math.floor(dmg));
+
+  dmg = Math.floor(dmg * typeMul(att.type, def.type));
+
+  if(def.status.guard>0) dmg = Math.floor(dmg*0.6);
+  if(def.trait==="硬化") dmg = Math.floor(dmg*0.85);
+
+  if(def.trait==="回避" && Math.random()<0.12){
+    return { dmg:0, evaded:true, crit:false };
+  }
+
+  let critRate = isSkill ? 0.12 : 0.06;
+  if(att.trait==="急所狙い" && isSkill) critRate += 0.12;
+  if(att.status.critBuff>0) critRate += 0.18;
+
+  const crit = Math.random()<critRate;
+  if(crit) dmg = Math.floor(dmg*1.55);
+
+  return { dmg, evaded:false, crit };
+}
+  
   function afterHit(state, att, def, dealt, usedSkill=false){
     if(att.trait==="毒" && usedSkill && dealt>0 && Math.random()<0.35){
       def.status.poison = Math.max(def.status.poison, 3);
@@ -484,7 +499,7 @@ function getEffectiveStats(state, mainBug){
     if(kind==="attack"){
       const hits = (me.trait==="連撃" && Math.random()<0.2) ? 2 : 1;
       for(let i=0;i<hits;i++){
-        const res = calcDamage(me, wild, 6, false);
+        const res = calcDamage(state, me, wild, 6, false);
         if(res.evaded) pushLog(state, `💨 ${wild.isLegendary?"伝説":"野生"}は回避した！`);
         else{
           wild.hp = clamp(wild.hp - res.dmg, 0, wild.hpMax);
@@ -512,7 +527,7 @@ function getEffectiveStats(state, mainBug){
       if(me.type==="飛") power = 9;
       if(me.type==="糸") power = 8;
 
-      const res = calcDamage(me, wild, power, true);
+      const res = calcDamage(state, me, wild, power, true);
       if(res.evaded) pushLog(state, `💨 ${wild.isLegendary?"伝説":"野生"}は回避した！`);
       else{
         wild.hp = clamp(wild.hp - res.dmg, 0, wild.hpMax);
@@ -544,7 +559,7 @@ function getEffectiveStats(state, mainBug){
     }
 
     const me = getSelected(state);
-    const res = calcDamage(wild, me, act==="skill" ? 11 : 6, act==="skill");
+    const res = calcDamage(state, wild, me, act==="skill" ? 11 : 6, act==="skill");
 
     if(res.evaded) pushLog(state, `💨 ${me.nickname} は回避した！`);
     else{
