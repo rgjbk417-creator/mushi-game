@@ -7,7 +7,8 @@
     LEGENDARY_RATE,
     LEGENDARY_STAT_MULT, LEGENDARY_WIN_EXP_MULT, LEGENDARY_GROWTH_MULT,
     TRAIN_MAX, TRAIN_REGEN_MS, TRAIN_CFG, tickTrain,
-    getEffectiveStats
+    getEffectiveStats,
+    getDexPlus, getDexStars, DEX_CAP
   } = window.MushiCore;
 
   const TABS = [
@@ -30,6 +31,17 @@
       el.classList.remove("show");
       el.setAttribute("aria-hidden","true");
     }, 1100);
+  }
+
+  function postRenderBattle(state){
+    const logEl = document.getElementById("logBattle");
+    if(logEl) logEl.scrollTop = logEl.scrollHeight;
+
+    const lastEl = document.getElementById("battleLast");
+    if(lastEl){
+      const logs = state.battle?.log || [];
+      lastEl.textContent = logs.length ? ("直近：" + logs[logs.length-1]) : "";
+    }
   }
 
   function renderTabs(state){
@@ -74,10 +86,18 @@
       ? `<span class="tag tagLegend">伝説</span><span class="muted">能力値×${LEGENDARY_STAT_MULT} / 成長×${LEGENDARY_GROWTH_MULT}</span>`
       : "";
 
+    const plus = state.dex ? getDexPlus(state, b.specId) : 0;
+    const star = state.dex ? getDexStars(state, b.specId) : 0;
+    const dexTag = (plus>0 || star>0)
+      ? `<div style="margin-top:8px">${plus>0?`<span class="tag">図鑑 +${plus}</span>`:""}${star>0?`<span class="tag">⭐${star}</span>`:""}</div>`
+      : "";
+
     return `
       <div class="card">
         <div class="h3">${b.isLegendary?"👑 ":""}${b.nickname} <span class="muted">(${sp.name}/${b.type})</span></div>
         <div class="muted">Lv.${b.level} / EXP ${b.exp} / ${expNeed}</div>
+
+        ${dexTag}
 
         <div class="sep"></div>
 
@@ -169,12 +189,10 @@
   }
 
   // =========================
-  // 画面：育成（サポ選択ここで実装）
+  // 画面：育成
   // =========================
   function screenTrain(state){
     const me = getSelected(state);
-
-    // ★トレ回数の回復を画面表示でも更新
     tickTrain(state);
 
     const options = state.bugs
@@ -198,8 +216,8 @@
 
     const eff = getEffectiveStats(state, me);
     const effHint = (state.party?.supportUid)
-      ? `<div class="muted">サポ反映（育成中のムシ）: ATK ${me.atk}→<b>${eff.atk}</b> / DEF ${me.def}→<b>${eff.def}</b> / SPD ${me.spd}→<b>${eff.spd}</b></div>`
-      : `<div class="muted">サポ: なし（設定すると有効ステが上がる）</div>`;
+      ? `<div class="muted">サポ反映（バトル時有効）: ATK ${me.atk}→<b>${eff.atk}</b> / DEF ${me.def}→<b>${eff.def}</b> / SPD ${me.spd}→<b>${eff.spd}</b></div>`
+      : `<div class="muted">サポ: なし（設定するとバトル時の有効ステが上がる）</div>`;
 
     return `
       <div class="row">
@@ -263,58 +281,65 @@
   }
 
   // =========================
-  // 画面：バトル
+  // 画面：バトル（1画面完結）
   // =========================
   function screenBattle(state){
     const me = getSelected(state);
     const wild = state.wild;
+
     const canAct = !!(wild && state.battle.active && !state.battle.over && state.battle.turn==="me");
     const canCapture = !!(wild && state.battle.active && state.battle.over && wild.hp<=0);
 
     const eff = getEffectiveStats(state, me);
     const effLine = state.party?.supportUid
-      ? `<div class="muted">サポ反映: ATK ${me.atk}→<b>${eff.atk}</b> / DEF ${me.def}→<b>${eff.def}</b> / SPD ${me.spd}→<b>${eff.spd}</b></div>`
+      ? `<div class="muted">有効ステ（サポ反映）: ATK ${me.atk}→<b>${eff.atk}</b> / DEF ${me.def}→<b>${eff.def}</b> / SPD ${me.spd}→<b>${eff.spd}</b></div>`
       : `<div class="muted">サポ: なし</div>`;
 
     return `
-      <div class="row">
-        <div class="card">
-          <div class="h2">⚔️ バトル</div>
-          <div class="muted">遭遇 → 戦う（開始） → コマンド。勝ったら捕獲。</div>
-          ${effLine}
-
-          <div class="sep"></div>
-
-          <div class="grid2">
-            <button class="btn" id="btnSpawn">🌿 遭遇する</button>
-            <button class="btn btn2" id="btnStartBattle" ${wild ? "" : "disabled"}>⚔️ 戦う（開始）</button>
+      <div class="battle">
+        <div class="battle-top">
+          <div class="mini-card">
+            ${wild ? renderWildCard(wild) : `<div class="card"><div class="h3">野生ムシ</div><div class="muted">まだいない。遭遇してね。</div></div>`}
           </div>
-
-          <div class="sep"></div>
-
-          <div class="grid2">
-            <button class="btn btn2" id="btnAtk" ${canAct ? "" : "disabled"}>🗡️ こうげき</button>
-            <button class="btn btn2" id="btnGuard" ${canAct ? "" : "disabled"}>🛡️ ぼうぎょ</button>
-            <button class="btn btn2" id="btnSkill" ${canAct ? "" : "disabled"}>✨ とくぎ</button>
-            <button class="btn" id="btnCapture" ${canCapture ? "" : "disabled"}>🫙 捕獲</button>
-          </div>
-
-          <div class="sep"></div>
-
-          <div class="grid2">
-            <button class="btn btn2" id="btnHealBattle">🩹 自分を回復</button>
-            <button class="btn btn2" id="btnSaveBattle">💾 保存</button>
+          <div class="mini-card">
+            ${renderBugCard(me, state)}
           </div>
         </div>
 
-        ${renderBugCard(me, state)}
-      </div>
+        <div class="battle-mid">
+          <div class="battle-log-wrap">
+            <div id="battleLast" class="muted"></div>
+            <pre class="log" id="logBattle">${(state.battle.log||[]).join("\n")}</pre>
+          </div>
+        </div>
 
-      <div class="row">
-        ${wild ? renderWildCard(wild) : `<div class="card"><div class="h3">野生ムシ</div><div class="muted">まだいない。遭遇してね。</div></div>`}
-        <div class="card">
-          <div class="h3">ログ</div>
-          <pre class="log" id="logBattle">${(state.battle.log||[]).join("\n")}</pre>
+        <div class="battle-bottom">
+          <div class="card">
+            <div class="h3">コマンド</div>
+            ${effLine}
+            <div class="sep"></div>
+
+            <div class="grid2">
+              <button class="btn" id="btnSpawn">🌿 遭遇する</button>
+              <button class="btn btn2" id="btnStartBattle" ${wild ? "" : "disabled"}>⚔️ 戦う（開始）</button>
+            </div>
+
+            <div class="sep"></div>
+
+            <div class="grid2">
+              <button class="btn btn2" id="btnAtk" ${canAct ? "" : "disabled"}>🗡️ こうげき</button>
+              <button class="btn btn2" id="btnGuard" ${canAct ? "" : "disabled"}>🛡️ ぼうぎょ</button>
+              <button class="btn btn2" id="btnSkill" ${canAct ? "" : "disabled"}>✨ とくぎ</button>
+              <button class="btn" id="btnCapture" ${canCapture ? "" : "disabled"}>🫙 捕獲</button>
+            </div>
+
+            <div class="sep"></div>
+
+            <div class="grid2">
+              <button class="btn btn2" id="btnHealBattle">🩹 自分を回復</button>
+              <button class="btn btn2" id="btnSaveBattle">💾 保存</button>
+            </div>
+          </div>
         </div>
       </div>
     `;
@@ -352,34 +377,59 @@
   }
 
   // =========================
-  // 画面：図鑑
+  // 画面：図鑑（BOX + 種族別累計）
   // =========================
   function screenDex(state){
+    const total = state.bugs.length;
+
+    const boxList = state.bugs
+      .map((b,i)=>`
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--line)">
+          <div class="muted">
+            ・${i+1}. ${b.isLegendary?"👑 ":""}<b>${b.nickname}</b>
+            <span class="muted">（${SPECIES.find(s=>s.id===b.specId)?.name||b.specId}/${b.type} Lv.${b.level}${b.trait?` / ${b.trait}`:""}）</span>
+            ${b.uid===state.selectedUid ? `<span class="tag">使用中</span>` : ``}
+          </div>
+          <button class="btn btn2" data-pick="${b.uid}">使う</button>
+        </div>
+      `)
+      .join("");
+
     const rows = SPECIES.map(s=>{
       const owned = state.bugs.filter(b=>b.specId===s.id).length;
       const ownedLegend = state.bugs.filter(b=>b.specId===s.id && b.isLegendary).length;
-      const captured = state.dex[s.id] || 0;
+      const got = state.dex[s.id] || 0;
+
+      const capped = Math.min(DEX_CAP, got);
+      const plus = Math.floor(capped / 10);
+      const star = Math.floor(capped / 100);
+
       return `
         <div style="padding:8px 0;border-bottom:1px solid var(--line)">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
             <div><b>${s.name}</b> <span class="muted">(${s.type})</span></div>
-            <div class="muted">所持:${owned}（👑${ownedLegend}） / 捕獲:${captured}</div>
+            <div class="muted">
+              所持:${owned}（👑${ownedLegend}） / 入手:${got}
+              ${plus>0?` <span class="tag">+${plus}</span>`:""}
+              ${star>0?` <span class="tag">⭐${star}</span>`:""}
+              ${got>=DEX_CAP?` <span class="tag tagLegend">MAX</span>`:""}
+            </div>
           </div>
         </div>
       `;
     }).join("");
 
-    const party = state.bugs
-      .map((b,i)=>`<div class="muted">・${i+1}. ${b.isLegendary?"👑 ":""}${b.nickname}（Lv.${b.level} / ${b.type}${b.trait?` / ${b.trait}`:""}）</div>`)
-      .join("");
-
     return `
       <div class="card">
-        <div class="h2">📚 図鑑 / 所持</div>
-        <div class="muted">所持ムシ：${state.bugs.length}匹</div>
+        <div class="h2">📚 図鑑 / BOX</div>
+        <div class="muted">所持ムシ：${total}匹（入手累計は種族別に加算、上限 ${DEX_CAP} 表示）</div>
+
         <div class="sep"></div>
-        ${party}
+        <div class="h3">📦 BOX（個体一覧）</div>
+        ${boxList || `<div class="muted">まだいない。</div>`}
+
         <div class="sep"></div>
+        <div class="h3">📚 図鑑（種族別の入手累計）</div>
         ${rows}
       </div>
     `;
@@ -431,7 +481,6 @@
         if(!state.party) state.party = { supportUid: null };
         state.party.supportUid = v;
 
-        // 選択ムシと同じはNG
         if(state.party.supportUid && state.party.supportUid === state.selectedUid){
           state.party.supportUid = null;
         }
@@ -544,6 +593,21 @@
       btnSaveGacha.addEventListener("click", () => { save(state); toast("保存した"); });
     }
 
+    // DEX/BOX：使用個体の切替
+    document.querySelectorAll("[data-pick]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const uid = btn.getAttribute("data-pick");
+        setSelected(state, uid);
+
+        // 選択個体と同一ならサポ解除（事故防止）
+        if(state.party?.supportUid && state.party.supportUid === uid){
+          state.party.supportUid = null;
+        }
+
+        toast("使用個体を変更");
+      });
+    });
+
     // SETTINGS
     const btnSaveSet = $("#btnSaveSet");
     if(btnSaveSet) btnSaveSet.addEventListener("click", () => { save(state); toast("保存した"); });
@@ -572,6 +636,10 @@
     else view.innerHTML = screenHome(state);
 
     bindScreenEvents(state);
+
+    if(state.route === "battle"){
+      postRenderBattle(state);
+    }
   }
 
   window.MushiUI = { render, toast };
