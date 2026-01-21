@@ -43,6 +43,46 @@
     "狡猾": { desc:"ぼうぎょで次ターン会心UP" },
     "狂戦士": { desc:"HP減るほど火力UP" },
   };
+  
+  // ===== サポート反映（合計10%配分）=====
+const SUPPORT_RATES = {
+  kabuto: { hp:0.00, atk:0.04, def:0.06, spd:0.00 },
+  kuwa:   { hp:0.00, atk:0.06, def:0.02, spd:0.02 },
+  bee:    { hp:0.00, atk:0.02, def:0.00, spd:0.08 },
+  spider: { hp:0.01, atk:0.01, def:0.04, spd:0.04 },
+  mantis: { hp:0.00, atk:0.07, def:0.00, spd:0.03 },
+};
+
+// Lv10区切りで段階アップ：Lv100で最大1.5倍
+function supportScaleByLevel(supportLv){
+  const L = clamp(supportLv || 1, 1, 100);
+  const step = Math.ceil(L / 10);   // 1〜10
+  const alpha = 0.5;               // step10で +0.5（=最大1.5倍）
+  return 1 + alpha * (step / 10);
+}
+
+// 「バトルで使う有効ステ」を返す（保存ステは触らない）
+function getEffectiveStats(state, mainBug){
+  const supportUid = state.party?.supportUid;
+  if(!supportUid) return {
+    hpMax: mainBug.hpMax, atk: mainBug.atk, def: mainBug.def, spd: mainBug.spd
+  };
+
+  const sup = state.bugs.find(b => b.uid === supportUid);
+  if(!sup) return {
+    hpMax: mainBug.hpMax, atk: mainBug.atk, def: mainBug.def, spd: mainBug.spd
+  };
+
+  const rate = SUPPORT_RATES[sup.specId] || { hp:0, atk:0, def:0, spd:0 };
+  const lvMul = supportScaleByLevel(sup.level);
+
+  const hpMax = Math.max(1, Math.floor(mainBug.hpMax * (1 + rate.hp * lvMul)));
+  const atk   = Math.max(1, Math.floor(mainBug.atk   * (1 + rate.atk * lvMul)));
+  const def   = Math.max(1, Math.floor(mainBug.def   * (1 + rate.def * lvMul)));
+  const spd   = Math.max(1, Math.floor(mainBug.spd   * (1 + rate.spd * lvMul)));
+
+  return { hpMax, atk, def, spd };
+}
 
   // =========================================================
   // [ユーティリティ]
@@ -559,8 +599,13 @@
       pushLog(state, `👑 伝説補正：能力値×${LEGENDARY_STAT_MULT} / 勝利EXP×${LEGENDARY_WIN_EXP_MULT} / 成長×${LEGENDARY_GROWTH_MULT}`);
     }
 
-    const ms = effectiveSpd(me);
-    const ws = effectiveSpd(state.wild);
+    const meEff = getEffectiveStats(state, me);
+
+// effectiveSpd() は「.spd」と「.status」を見るから
+// “一時オブジェクト”にして渡す（保存ステは触らない）
+const ms = effectiveSpd({ spd: meEff.spd, status: me.status });
+const ws = effectiveSpd({ spd: state.wild.spd, status: state.wild.status });
+
     state.battle.turn = (ms>ws) ? "me" : (ws>ms ? "wild" : (Math.random()<0.5 ? "me" : "wild"));
     pushLog(state, `▶️ 先手: ${state.battle.turn==="me" ? me.nickname : (state.wild.isLegendary?"伝説":"野生")}`);
 
