@@ -7,8 +7,7 @@
     LEGENDARY_RATE,
     LEGENDARY_STAT_MULT, LEGENDARY_WIN_EXP_MULT, LEGENDARY_GROWTH_MULT,
     TRAIN_MAX, TRAIN_REGEN_MS, TRAIN_CFG, tickTrain,
-    getEffectiveStats,
-    getDexPlus, getDexStars, DEX_CAP
+    getEffectiveStats
   } = window.MushiCore;
 
   const TABS = [
@@ -24,6 +23,7 @@
 
   function toast(msg){
     const el = $("#toast");
+    if(!el) return;
     el.textContent = msg;
     el.classList.add("show");
     el.setAttribute("aria-hidden","false");
@@ -33,19 +33,9 @@
     }, 1100);
   }
 
-  function postRenderBattle(state){
-    const logEl = document.getElementById("logBattle");
-    if(logEl) logEl.scrollTop = logEl.scrollHeight;
-
-    const lastEl = document.getElementById("battleLast");
-    if(lastEl){
-      const logs = state.battle?.log || [];
-      lastEl.textContent = logs.length ? ("直近：" + logs[logs.length-1]) : "";
-    }
-  }
-
   function renderTabs(state){
     const tabbar = $("#tabbar");
+    if(!tabbar) return;
     tabbar.innerHTML = TABS.map(t => {
       const active = (state.route === t.id) ? "active" : "";
       return `<div class="tab ${active}" data-route="${t.id}">${t.label.replace("\n","<br>")}</div>`;
@@ -60,7 +50,9 @@
   }
 
   function renderTop(state){
-    $("#chipCoins").textContent = `🪙 ${state.coins}`;
+    const chip = $("#chipCoins");
+    if(chip) chip.textContent = `🪙 ${state.coins}`;
+
     const titleMap = {
       home:"HOME",
       train:"ムシ育成",
@@ -69,7 +61,8 @@
       dex:"図鑑",
       settings:"設定",
     };
-    $("#topTitle").textContent = `ムシ育成バトル / ${titleMap[state.route] || "HOME"}`;
+    const topTitle = $("#topTitle");
+    if(topTitle) topTitle.textContent = `ムシ育成バトル / ${titleMap[state.route] || "HOME"}`;
   }
 
   function renderBugCard(b, state){
@@ -86,18 +79,10 @@
       ? `<span class="tag tagLegend">伝説</span><span class="muted">能力値×${LEGENDARY_STAT_MULT} / 成長×${LEGENDARY_GROWTH_MULT}</span>`
       : "";
 
-    const plus = state.dex ? getDexPlus(state, b.specId) : 0;
-    const star = state.dex ? getDexStars(state, b.specId) : 0;
-    const dexTag = (plus>0 || star>0)
-      ? `<div style="margin-top:8px">${plus>0?`<span class="tag">図鑑 +${plus}</span>`:""}${star>0?`<span class="tag">⭐${star}</span>`:""}</div>`
-      : "";
-
     return `
       <div class="card">
         <div class="h3">${b.isLegendary?"👑 ":""}${b.nickname} <span class="muted">(${sp.name}/${b.type})</span></div>
         <div class="muted">Lv.${b.level} / EXP ${b.exp} / ${expNeed}</div>
-
-        ${dexTag}
 
         <div class="sep"></div>
 
@@ -193,6 +178,7 @@
   // =========================
   function screenTrain(state){
     const me = getSelected(state);
+
     tickTrain(state);
 
     const options = state.bugs
@@ -216,8 +202,8 @@
 
     const eff = getEffectiveStats(state, me);
     const effHint = (state.party?.supportUid)
-      ? `<div class="muted">サポ反映（バトル時有効）: ATK ${me.atk}→<b>${eff.atk}</b> / DEF ${me.def}→<b>${eff.def}</b> / SPD ${me.spd}→<b>${eff.spd}</b></div>`
-      : `<div class="muted">サポ: なし（設定するとバトル時の有効ステが上がる）</div>`;
+      ? `<div class="muted">サポ反映（育成中のムシ）: ATK ${me.atk}→<b>${eff.atk}</b> / DEF ${me.def}→<b>${eff.def}</b> / SPD ${me.spd}→<b>${eff.spd}</b></div>`
+      : `<div class="muted">サポ: なし（設定すると有効ステが上がる）</div>`;
 
     return `
       <div class="row">
@@ -281,7 +267,7 @@
   }
 
   // =========================
-  // 画面：バトル（1画面完結）
+  // 画面：バトル（縦レイアウト・1画面完結）
   // =========================
   function screenBattle(state){
     const me = getSelected(state);
@@ -292,60 +278,64 @@
 
     const eff = getEffectiveStats(state, me);
     const effLine = state.party?.supportUid
-      ? `<div class="muted">有効ステ（サポ反映）: ATK ${me.atk}→<b>${eff.atk}</b> / DEF ${me.def}→<b>${eff.def}</b> / SPD ${me.spd}→<b>${eff.spd}</b></div>`
-      : `<div class="muted">サポ: なし</div>`;
+      ? `<div class="muted" style="margin-top:6px">サポ反映: ATK ${me.atk}→<b>${eff.atk}</b> / DEF ${me.def}→<b>${eff.def}</b> / SPD ${me.spd}→<b>${eff.spd}</b></div>`
+      : `<div class="muted" style="margin-top:6px">サポ: なし</div>`;
 
-   return `
-  <div class="battle">
+    // 画面崩れ対策：高さを固定し、ログ領域を必ず確保する
+    const containerStyle = `min-height: calc(100vh - 60px - 96px); display:flex; flex-direction:column; gap:10px;`;
 
-    <div class="battle-top">
-      <div class="card mini-card">
-        <div class="h3">敵</div>
-        ${wild ? renderWildCard(wild) : `<div class="muted">まだいない（遭遇してね）</div>`}
-      </div>
+    return `
+      <div class="battle" style="${containerStyle}">
 
-      <div class="card mini-card">
-        <div class="h3">自分</div>
-        ${renderBugCard(me, state)}
-        ${effLine}
-      </div>
-    </div>
+        <div class="card" style="padding:10px">
+          <div class="h2">⚔️ バトル</div>
+          <div class="muted">遭遇 → 開始 → コマンド。勝ったら捕獲。</div>
+          ${effLine}
 
-    <div class="battle-mid">
-      <div class="card battle-log-wrap">
-        <div class="h3">ログ</div>
-        <div id="battleLast"></div>
-        <pre class="log" id="logBattle">${(state.battle.log||[]).join("\n")}</pre>
-      </div>
-    </div>
+          <div class="sep"></div>
 
-    <div class="battle-bottom">
-      <div class="card">
-        <div class="grid2">
-          <button class="btn" id="btnSpawn">🌿 遭遇する</button>
-          <button class="btn btn2" id="btnStartBattle" ${wild ? "" : "disabled"}>⚔️ 戦う（開始）</button>
+          <div class="grid2">
+            <button class="btn" id="btnSpawn">🌿 遭遇する</button>
+            <button class="btn btn2" id="btnStartBattle" ${wild ? "" : "disabled"}>⚔️ 戦う（開始）</button>
+          </div>
         </div>
 
-        <div class="sep"></div>
+        <div style="display:flex; flex-direction:column; gap:10px">
+          <div class="card" style="padding:10px">
+            <div class="h3">敵</div>
+            ${wild ? renderWildCard(wild) : `<div class="muted">まだいない。遭遇してね。</div>`}
+          </div>
 
-        <div class="grid2">
-          <button class="btn btn2" id="btnAtk" ${canAct ? "" : "disabled"}>🗡️ こうげき</button>
-          <button class="btn btn2" id="btnGuard" ${canAct ? "" : "disabled"}>🛡️ ぼうぎょ</button>
-          <button class="btn btn2" id="btnSkill" ${canAct ? "" : "disabled"}>✨ とくぎ</button>
-          <button class="btn" id="btnCapture" ${canCapture ? "" : "disabled"}>🫙 捕獲</button>
+          <div class="card" style="padding:10px">
+            <div class="h3">自分</div>
+            ${renderBugCard(me, state)}
+          </div>
         </div>
 
-        <div class="sep"></div>
-
-        <div class="grid2">
-          <button class="btn btn2" id="btnHealBattle">🩹 自分を回復</button>
-          <button class="btn btn2" id="btnSaveBattle">💾 保存</button>
+        <div class="card" style="flex:1; min-height:180px; display:flex; flex-direction:column; padding:10px">
+          <div class="h3">ログ</div>
+          <div id="battleLast" class="muted" style="margin:4px 0 8px; opacity:.9"></div>
+          <pre class="log" id="logBattle" style="flex:1; max-height:none; height:100%; overflow:auto;">${(state.battle.log||[]).join("\n")}</pre>
         </div>
+
+        <div class="card" style="padding:10px">
+          <div class="grid2">
+            <button class="btn btn2" id="btnAtk" ${canAct ? "" : "disabled"}>🗡️ こうげき</button>
+            <button class="btn btn2" id="btnGuard" ${canAct ? "" : "disabled"}>🛡️ ぼうぎょ</button>
+            <button class="btn btn2" id="btnSkill" ${canAct ? "" : "disabled"}>✨ とくぎ</button>
+            <button class="btn" id="btnCapture" ${canCapture ? "" : "disabled"}>🫙 捕獲</button>
+          </div>
+
+          <div class="sep"></div>
+
+          <div class="grid2">
+            <button class="btn btn2" id="btnHealBattle">🩹 自分を回復</button>
+            <button class="btn btn2" id="btnSaveBattle">💾 保存</button>
+          </div>
+        </div>
+
       </div>
-    </div>
-
-  </div>
-`;
+    `;
   }
 
   // =========================
@@ -380,59 +370,34 @@
   }
 
   // =========================
-  // 画面：図鑑（BOX + 種族別累計）
+  // 画面：図鑑
   // =========================
   function screenDex(state){
-    const total = state.bugs.length;
-
-    const boxList = state.bugs
-      .map((b,i)=>`
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--line)">
-          <div class="muted">
-            ・${i+1}. ${b.isLegendary?"👑 ":""}<b>${b.nickname}</b>
-            <span class="muted">（${SPECIES.find(s=>s.id===b.specId)?.name||b.specId}/${b.type} Lv.${b.level}${b.trait?` / ${b.trait}`:""}）</span>
-            ${b.uid===state.selectedUid ? `<span class="tag">使用中</span>` : ``}
-          </div>
-          <button class="btn btn2" data-pick="${b.uid}">使う</button>
-        </div>
-      `)
-      .join("");
-
     const rows = SPECIES.map(s=>{
       const owned = state.bugs.filter(b=>b.specId===s.id).length;
       const ownedLegend = state.bugs.filter(b=>b.specId===s.id && b.isLegendary).length;
-      const got = state.dex[s.id] || 0;
-
-      const capped = Math.min(DEX_CAP, got);
-      const plus = Math.floor(capped / 10);
-      const star = Math.floor(capped / 100);
-
+      const captured = state.dex[s.id] || 0;
       return `
         <div style="padding:8px 0;border-bottom:1px solid var(--line)">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
             <div><b>${s.name}</b> <span class="muted">(${s.type})</span></div>
-            <div class="muted">
-              所持:${owned}（👑${ownedLegend}） / 入手:${got}
-              ${plus>0?` <span class="tag">+${plus}</span>`:""}
-              ${star>0?` <span class="tag">⭐${star}</span>`:""}
-              ${got>=DEX_CAP?` <span class="tag tagLegend">MAX</span>`:""}
-            </div>
+            <div class="muted">所持:${owned}（👑${ownedLegend}） / 捕獲:${captured}</div>
           </div>
         </div>
       `;
     }).join("");
 
+    const party = state.bugs
+      .map((b,i)=>`<div class="muted">・${i+1}. ${b.isLegendary?"👑 ":""}${b.nickname}（Lv.${b.level} / ${b.type}${b.trait?` / ${b.trait}`:""}）</div>`)
+      .join("");
+
     return `
       <div class="card">
-        <div class="h2">📚 図鑑 / BOX</div>
-        <div class="muted">所持ムシ：${total}匹（入手累計は種族別に加算、上限 ${DEX_CAP} 表示）</div>
-
+        <div class="h2">📚 図鑑 / 所持</div>
+        <div class="muted">所持ムシ：${state.bugs.length}匹</div>
         <div class="sep"></div>
-        <div class="h3">📦 BOX（個体一覧）</div>
-        ${boxList || `<div class="muted">まだいない。</div>`}
-
+        ${party}
         <div class="sep"></div>
-        <div class="h3">📚 図鑑（種族別の入手累計）</div>
         ${rows}
       </div>
     `;
@@ -540,21 +505,26 @@
     if(btnSpawn){
       btnSpawn.addEventListener("click", () => {
         window.MushiCore.spawnWild(state);
+        setRoute(state, "battle"); // 念のためバトル画面に固定
         toast("遭遇！");
       });
     }
+
     const btnStart = $("#btnStartBattle");
-   if(btnStart){
-  btnStart.addEventListener("click", () => {
-    window.MushiCore.startBattle(state);
-    window.MushiState.setRoute(state, "battle"); // ★バトル画面へ
-    toast("開戦");
-  });
+    if(btnStart){
+      btnStart.addEventListener("click", () => {
+        window.MushiCore.startBattle(state);
+        setRoute(state, "battle"); // ★開始したら必ずバトル画面へ
+        toast("開戦");
+      });
     }
+
     const btnAtk = $("#btnAtk");
     if(btnAtk) btnAtk.addEventListener("click", () => window.MushiCore.myAct(state, "attack"));
+
     const btnGuard = $("#btnGuard");
     if(btnGuard) btnGuard.addEventListener("click", () => window.MushiCore.myAct(state, "guard"));
+
     const btnSkill = $("#btnSkill");
     if(btnSkill) btnSkill.addEventListener("click", () => window.MushiCore.myAct(state, "skill"));
 
@@ -565,6 +535,7 @@
         if(ok) toast("捕獲成功");
       });
     }
+
     const btnHealBattle = $("#btnHealBattle");
     if(btnHealBattle){
       btnHealBattle.addEventListener("click", () => {
@@ -572,6 +543,7 @@
         toast("回復した");
       });
     }
+
     const btnSaveBattle = $("#btnSaveBattle");
     if(btnSaveBattle){
       btnSaveBattle.addEventListener("click", () => { save(state); toast("保存した"); });
@@ -597,21 +569,6 @@
       btnSaveGacha.addEventListener("click", () => { save(state); toast("保存した"); });
     }
 
-    // DEX/BOX：使用個体の切替
-    document.querySelectorAll("[data-pick]").forEach(btn => {
-      btn.addEventListener("click", () => {
-        const uid = btn.getAttribute("data-pick");
-        setSelected(state, uid);
-
-        // 選択個体と同一ならサポ解除（事故防止）
-        if(state.party?.supportUid && state.party.supportUid === uid){
-          state.party.supportUid = null;
-        }
-
-        toast("使用個体を変更");
-      });
-    });
-
     // SETTINGS
     const btnSaveSet = $("#btnSaveSet");
     if(btnSaveSet) btnSaveSet.addEventListener("click", () => { save(state); toast("保存した"); });
@@ -626,11 +583,26 @@
     }
   }
 
+  function postRenderBattle(state){
+    if(state.route !== "battle") return;
+
+    const logEl = document.getElementById("logBattle");
+    if(logEl) logEl.scrollTop = logEl.scrollHeight;
+
+    const lastEl = document.getElementById("battleLast");
+    if(lastEl){
+      const logs = state.battle?.log || [];
+      lastEl.textContent = logs.length ? ("直近：" + logs[logs.length-1]) : "";
+    }
+  }
+
   function render(state){
     renderTop(state);
     renderTabs(state);
 
     const view = $("#view");
+    if(!view) return;
+
     if(state.route === "home") view.innerHTML = screenHome(state);
     else if(state.route === "train") view.innerHTML = screenTrain(state);
     else if(state.route === "battle") view.innerHTML = screenBattle(state);
@@ -640,10 +612,7 @@
     else view.innerHTML = screenHome(state);
 
     bindScreenEvents(state);
-
-    if(state.route === "battle"){
-      postRenderBattle(state);
-    }
+    postRenderBattle(state);
   }
 
   window.MushiUI = { render, toast };
