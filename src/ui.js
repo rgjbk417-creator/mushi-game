@@ -295,54 +295,57 @@
       ? `<div class="muted">有効ステ（サポ反映）: ATK ${me.atk}→<b>${eff.atk}</b> / DEF ${me.def}→<b>${eff.def}</b> / SPD ${me.spd}→<b>${eff.spd}</b></div>`
       : `<div class="muted">サポ: なし</div>`;
 
-    return `
-      <div class="battle">
-        <div class="battle-top">
-          <div class="mini-card">
-            ${wild ? renderWildCard(wild) : `<div class="card"><div class="h3">野生ムシ</div><div class="muted">まだいない。遭遇してね。</div></div>`}
-          </div>
-          <div class="mini-card">
-            ${renderBugCard(me, state)}
-          </div>
+   return `
+  <div class="battle">
+
+    <div class="battle-top">
+      <div class="card mini-card">
+        <div class="h3">敵</div>
+        ${wild ? renderWildCard(wild) : `<div class="muted">まだいない（遭遇してね）</div>`}
+      </div>
+
+      <div class="card mini-card">
+        <div class="h3">自分</div>
+        ${renderBugCard(me, state)}
+        ${effLine}
+      </div>
+    </div>
+
+    <div class="battle-mid">
+      <div class="card battle-log-wrap">
+        <div class="h3">ログ</div>
+        <div id="battleLast"></div>
+        <pre class="log" id="logBattle">${(state.battle.log||[]).join("\n")}</pre>
+      </div>
+    </div>
+
+    <div class="battle-bottom">
+      <div class="card">
+        <div class="grid2">
+          <button class="btn" id="btnSpawn">🌿 遭遇する</button>
+          <button class="btn btn2" id="btnStartBattle" ${wild ? "" : "disabled"}>⚔️ 戦う（開始）</button>
         </div>
 
-        <div class="battle-mid">
-          <div class="battle-log-wrap">
-            <div id="battleLast" class="muted"></div>
-            <pre class="log" id="logBattle">${(state.battle.log||[]).join("\n")}</pre>
-          </div>
+        <div class="sep"></div>
+
+        <div class="grid2">
+          <button class="btn btn2" id="btnAtk" ${canAct ? "" : "disabled"}>🗡️ こうげき</button>
+          <button class="btn btn2" id="btnGuard" ${canAct ? "" : "disabled"}>🛡️ ぼうぎょ</button>
+          <button class="btn btn2" id="btnSkill" ${canAct ? "" : "disabled"}>✨ とくぎ</button>
+          <button class="btn" id="btnCapture" ${canCapture ? "" : "disabled"}>🫙 捕獲</button>
         </div>
 
-        <div class="battle-bottom">
-          <div class="card">
-            <div class="h3">コマンド</div>
-            ${effLine}
-            <div class="sep"></div>
+        <div class="sep"></div>
 
-            <div class="grid2">
-              <button class="btn" id="btnSpawn">🌿 遭遇する</button>
-              <button class="btn btn2" id="btnStartBattle" ${wild ? "" : "disabled"}>⚔️ 戦う（開始）</button>
-            </div>
-
-            <div class="sep"></div>
-
-            <div class="grid2">
-              <button class="btn btn2" id="btnAtk" ${canAct ? "" : "disabled"}>🗡️ こうげき</button>
-              <button class="btn btn2" id="btnGuard" ${canAct ? "" : "disabled"}>🛡️ ぼうぎょ</button>
-              <button class="btn btn2" id="btnSkill" ${canAct ? "" : "disabled"}>✨ とくぎ</button>
-              <button class="btn" id="btnCapture" ${canCapture ? "" : "disabled"}>🫙 捕獲</button>
-            </div>
-
-            <div class="sep"></div>
-
-            <div class="grid2">
-              <button class="btn btn2" id="btnHealBattle">🩹 自分を回復</button>
-              <button class="btn btn2" id="btnSaveBattle">💾 保存</button>
-            </div>
-          </div>
+        <div class="grid2">
+          <button class="btn btn2" id="btnHealBattle">🩹 自分を回復</button>
+          <button class="btn btn2" id="btnSaveBattle">💾 保存</button>
         </div>
       </div>
-    `;
+    </div>
+
+  </div>
+`;
   }
 
   // =========================
@@ -541,11 +544,12 @@
       });
     }
     const btnStart = $("#btnStartBattle");
-    if(btnStart){
-      btnStart.addEventListener("click", () => {
-        window.MushiCore.startBattle(state);
-        toast("開戦");
-      });
+   if(btnStart){
+  btnStart.addEventListener("click", () => {
+    window.MushiCore.startBattle(state);
+    window.MushiState.setRoute(state, "battle"); // ★バトル画面へ
+    toast("開戦");
+  });
     }
     const btnAtk = $("#btnAtk");
     if(btnAtk) btnAtk.addEventListener("click", () => window.MushiCore.myAct(state, "attack"));
