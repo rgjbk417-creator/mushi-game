@@ -26,7 +26,7 @@
       route: "home",
       coins: 0,
       bugs: [],
-      dex: {},
+      dex: {},                 // 図鑑累計（ガチャ/捕獲で加算）
       selectedUid: null,
       wild: null,
       battle: { active:false, over:false, turn:"", log:[] },
