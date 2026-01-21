@@ -113,9 +113,85 @@
   }
 
   // =========================================================
-  // サポート（B案：種族ごとの“反映率” + レベルで倍率）
+  // 図鑑ボーナス（1000上限・逓減・常時反映）
+  // ※ステは “保存値を直接いじる” というより、recalc後に派生補正として上乗せする
   // =========================================================
-  // 合計10%配分（好みで調整OK）
+  const DEX_CAP = 1000;
+
+  function dexWeightByCount(c){
+    if(c <= 100) return 1.0;
+    if(c <= 300) return 0.6;
+    if(c <= 600) return 0.35;
+    return 0.2; // 601〜1000
+  }
+
+  function getDexCount(state, specId){
+    const raw = (state.dex && state.dex[specId]) ? state.dex[specId] : 0;
+    return Math.max(0, Math.min(DEX_CAP, raw));
+  }
+
+  function getDexPlus(state, specId){
+    return Math.floor(getDexCount(state, specId) / 10);
+  }
+
+  function getDexStars(state, specId){
+    return Math.floor(getDexCount(state, specId) / 100);
+  }
+
+  function getDexEffectiveStage(state, specId){
+    const c = getDexCount(state, specId);
+    const stages = Math.floor(c / 10);
+    let eff = 0;
+    for(let i=1;i<=stages;i++){
+      const at = i * 10;
+      eff += dexWeightByCount(at);
+    }
+    return eff;
+  }
+
+  // 反映率（安全運用。後で調整前提）
+  const DEX_RATE_COMMON = { atk:0.002, def:0.002, spd:0.002 }; // 0.2%/実効段階
+  const DEX_RATE_KABUTO_HP = 0.005; // 0.5%/実効段階（カブト優遇）
+
+  function applyDexBonusToBug(state, bug){
+    if(!bug || bug.isWild) return;
+    const eff = getDexEffectiveStage(state, bug.specId);
+    if(eff <= 0) return;
+
+    bug.atk = Math.max(1, Math.floor(bug.atk * (1 + DEX_RATE_COMMON.atk * eff)));
+    bug.def = Math.max(1, Math.floor(bug.def * (1 + DEX_RATE_COMMON.def * eff)));
+    bug.spd = Math.max(1, Math.floor(bug.spd * (1 + DEX_RATE_COMMON.spd * eff)));
+
+    if(bug.specId === "kabuto"){
+      bug.hpMax = Math.max(1, Math.floor(bug.hpMax * (1 + DEX_RATE_KABUTO_HP * eff)));
+    }
+
+    // 表示用メモ（任意）
+    bug.dexPlus = getDexPlus(state, bug.specId);
+    bug.dexStars = getDexStars(state, bug.specId);
+
+    // HPは上限に合わせる（上がった場合はそのまま、下がった場合は丸める）
+    if(typeof bug.hp !== "number") bug.hp = bug.hpMax;
+    bug.hp = clamp(bug.hp, 0, bug.hpMax);
+  }
+
+  function bumpDex(state, specId, add=1){
+    if(!state.dex) state.dex = {};
+    state.dex[specId] = (state.dex[specId] || 0) + add;
+
+    // 同種族の所持個体を再計算（図鑑ボーナスが“常時反映”になる）
+    for(const b of state.bugs || []){
+      if(b.specId !== specId) continue;
+      recalc(b);
+      applyDexBonusToBug(state, b);
+      if(typeof b.hp !== "number") b.hp = b.hpMax;
+      b.hp = clamp(b.hp, 0, b.hpMax);
+    }
+  }
+
+  // =========================================================
+  // サポート（現行機能）
+  // =========================================================
   const SUPPORT_RATES = {
     kabuto: { hp:0.00, atk:0.04, def:0.06, spd:0.00 },
     kuwa:   { hp:0.00, atk:0.06, def:0.02, spd:0.02 },
@@ -124,7 +200,6 @@
     mantis: { hp:0.00, atk:0.07, def:0.00, spd:0.03 },
   };
 
-  // Lv10区切りで段階アップ：Lv100で最大1.5倍
   function supportScaleByLevel(supportLv){
     const L = clamp(supportLv || 1, 1, 100);
     const step = Math.ceil(L / 10); // 1〜10
@@ -132,7 +207,7 @@
     return 1 + alpha * (step / 10);
   }
 
-  // 「バトルで使う有効ステ」を返す（保存ステは触らない）
+  // 「バトルで使う有効ステ」を返す（サポのみ上乗せ。図鑑は既に常時反映済み）
   function getEffectiveStats(state, mainBug){
     const supportUid = state.party?.supportUid;
     if(!supportUid) return {
@@ -144,7 +219,6 @@
       hpMax: mainBug.hpMax, atk: mainBug.atk, def: mainBug.def, spd: mainBug.spd
     };
 
-    // メインと同一個体をサポにした場合は無効
     if(sup.uid === mainBug.uid) return {
       hpMax: mainBug.hpMax, atk: mainBug.atk, def: mainBug.def, spd: mainBug.spd
     };
@@ -170,7 +244,7 @@
     if(!Array.isArray(state.battle.log)) state.battle.log = [];
     if(!state.gacha) state.gacha = { last:null };
 
-    // ★サポ（ここが“実装”の核）
+    // サポ
     if(!state.party) state.party = { supportUid: null };
     if(typeof state.party.supportUid === "undefined") state.party.supportUid = null;
 
@@ -181,6 +255,9 @@
       const c = makeBug("bee", 1, false, false);
       state.bugs = [a,b,c];
       state.selectedUid = a.uid;
+
+      // 初期個体も “入手扱い” にしたいならここで bumpDex する案もあるが、
+      // 現状は「入手（捕獲/ガチャ）」時に加算する方針に合わせてここでは増やさない
     }
 
     // 個体の整形
@@ -189,8 +266,12 @@
       b.statMult = b.isLegendary ? LEGENDARY_STAT_MULT : (b.statMult || 1);
       b.growthMult = b.isLegendary ? LEGENDARY_GROWTH_MULT : (b.growthMult || 1);
       if(!b.status) b.status = { poison:0, slow:0, guard:0, critBuff:0, firstTurn:true };
+
       recalc(b);
+      applyDexBonusToBug(state, b);
+
       if(typeof b.hp !== "number") b.hp = b.hpMax;
+      b.hp = clamp(b.hp, 0, b.hpMax);
     }
 
     if(!state.selectedUid || !state.bugs.some(x=>x.uid===state.selectedUid)){
@@ -201,12 +282,11 @@
     if(state.party.supportUid && !state.bugs.some(b => b.uid === state.party.supportUid)){
       state.party.supportUid = null;
     }
-    // supportUid が選択個体と同じなら解除
     if(state.party.supportUid && state.party.supportUid === state.selectedUid){
       state.party.supportUid = null;
     }
 
-    // wild互換
+    // wild互換（野生に図鑑ボーナスは乗せない）
     if(state.wild){
       state.wild.isLegendary = !!state.wild.isLegendary;
       state.wild.statMult = state.wild.isLegendary ? LEGENDARY_STAT_MULT : (state.wild.statMult || 1);
@@ -214,6 +294,7 @@
       if(!state.wild.status) state.wild.status = { poison:0, slow:0, guard:0, critBuff:0, firstTurn:true };
       recalc(state.wild);
       if(typeof state.wild.hp !== "number") state.wild.hp = state.wild.hpMax;
+      state.wild.hp = clamp(state.wild.hp, 0, state.wild.hpMax);
     }
 
     // トレの互換
@@ -274,15 +355,12 @@
 
       const g = bug.growthMult || 1;
 
-      // HPは毎回ちょい伸び
       bug.iv.hp += r(0,1) * g;
 
-      // 基本確率
       let atkChance = 0.70;
       let defChance = 0.70;
       let spdChance = 0.60;
 
-      // 寄せ補正
       if(sourceMode === "atk"){
         atkChance = 0.90; defChance = 0.60; spdChance = 0.55;
       }else if(sourceMode === "def"){
@@ -311,6 +389,7 @@
       }
 
       recalc(bug);
+      applyDexBonusToBug(state, bug);
       bug.hp = bug.hpMax;
 
       const tag =
@@ -324,6 +403,7 @@
     }
 
     recalc(bug);
+    applyDexBonusToBug(state, bug);
   }
 
   // mode: "atk" | "def" | "spd" | "trait"
@@ -387,7 +467,7 @@
     b.status.firstTurn = false;
   }
 
-  // ★ここがサポ反映（ATK/DEF）
+  // サポ反映（ATK/DEFのみ）
   function calcDamage(state, att, def, basePower, isSkill=false){
     const me = getSelected(state);
 
@@ -604,13 +684,16 @@
     state.battle.active = true;
     state.battle.over = false;
 
+    // ★バトル開始したらバトル画面へ
+    state.route = "battle";
+
     me.status = { poison:0, slow:0, guard:0, critBuff:0, firstTurn:true };
     state.wild.status = { poison:0, slow:0, guard:0, critBuff:0, firstTurn:true };
 
     clearLog(state);
     pushLog(state, `⚔️ バトル開始！ ${me.nickname} vs ${state.wild.isLegendary ? "伝説の" : "野生の"}${state.wild.nickname}`);
 
-    // ★先手判定：自分側だけサポSPD反映
+    // ★先手判定：自分側だけサポSPD反映（図鑑は常時反映済み）
     const meEff = getEffectiveStats(state, me);
     const ms = effectiveSpd({ spd: meEff.spd, status: me.status });
     const ws = effectiveSpd({ spd: state.wild.spd, status: state.wild.status });
@@ -645,7 +728,9 @@
       got.status = { poison:0, slow:0, guard:0, critBuff:0, firstTurn:true };
 
       state.bugs.push(got);
-      state.dex[got.specId] = (state.dex[got.specId]||0) + 1;
+
+      // ★図鑑累計（捕獲/ガチャ共通）
+      bumpDex(state, got.specId, 1);
 
       state.wild = null;
       state.battle.active = false;
@@ -681,7 +766,10 @@
       }
 
       state.bugs.push(b);
-      state.dex[b.specId] = (state.dex[b.specId]||0) + 1;
+
+      // ★図鑑累計（捕獲/ガチャ共通）
+      bumpDex(state, b.specId, 1);
+
       results.push(b);
     }
 
@@ -698,6 +786,13 @@
     SPECIES,
     TRAITS,
     expToNext,
+
+    // dex
+    DEX_CAP,
+    getDexCount,
+    getDexPlus,
+    getDexStars,
+    getDexEffectiveStage,
 
     ensureCoreState,
     getSelected,
